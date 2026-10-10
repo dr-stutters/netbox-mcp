@@ -219,8 +219,10 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `netbox_whats_connected` | What's plugged into an interface: the far-end device (through patch panels) with its role, rack position and primary IP, or the circuit/provider network |
 | `netbox_trace_cable` | Full cable path through patch panels and circuits, and whether it's complete. Also traces from patch-panel front/rear ports and circuit terminations (by circuit ID), listing every path through them |
 | `netbox_prefix_utilization` | Utilisation, using NetBox's own rules, plus child prefixes and the first free IP or free blocks |
-| `netbox_next_available_ips` | Preview the next free IPs in a prefix |
+| `netbox_next_available_ips` | Preview the next free IPs in a prefix or an IP range (by any address inside it, or `start-end`) |
 | `netbox_next_available_prefixes` | Preview free blocks, or the next N child prefixes of a given size |
+| `netbox_next_available_vlans` | Preview the next free VLAN IDs in a VLAN group |
+| `netbox_next_available_asns` | Preview the next free AS numbers in an ASN range |
 | `netbox_vlan_lookup` | VLAN by ID or name, with its prefixes and the tagged and untagged interfaces carrying it |
 | `netbox_site_summary` | Everything at a site: details, locations, racks with utilisation, devices by role and status, VMs, prefixes, VLANs and circuits |
 | `netbox_rack_elevation` | What's in a rack, unit by unit: devices and faces, reservations, free ranges, utilisation |
@@ -247,8 +249,11 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `netbox_create_object` | Create one or many objects. Field names are checked |
 | `netbox_update_object` | Partial update of one object, or the same change across many |
 | `netbox_delete_object` | Delete by ID. If any ID is missing, nothing is deleted |
-| `netbox_allocate_ips` | Reserve the next free IP(s) atomically. Optionally assign to an interface and set as primary |
+| `netbox_allocate_ips` | Reserve the next free IP(s) in a prefix or IP range atomically. Optionally assign to an interface and set as primary |
 | `netbox_allocate_prefix` | Carve the next free child prefix(es) atomically |
+| `netbox_allocate_vlans` | Create VLANs with the next free VIDs in a group (one per name) |
+| `netbox_allocate_asns` | Reserve the next free AS number(s) from an ASN range |
+| `netbox_connect_cable` | Connect two ports by name, e.g. lab-sw1 Gi1/0/5 → lab-pp1 FP2. Works with interfaces, front/rear ports, console, power and circuit terminations. Refuses ports that are already cabled, and reports where the new path leads |
 | `netbox_add_journal_entry` | Add a dated note to any object, e.g. "replaced PSU" (info / success / warning / danger) |
 
 ## Security notes

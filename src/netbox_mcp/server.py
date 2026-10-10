@@ -42,7 +42,8 @@ cables, IP addresses, prefixes, VLANs, VRFs and virtual machines.
 - Start with the task tools: netbox_search, netbox_lookup_ip, netbox_lookup_mac,
   netbox_device_summary, netbox_interface_detail, netbox_whats_connected, netbox_trace_cable,
   netbox_site_summary, netbox_rack_elevation, netbox_find_rack_space, netbox_prefix_utilization,
-  netbox_next_available_ips, netbox_next_available_prefixes, netbox_vlan_lookup,
+  netbox_next_available_ips, netbox_next_available_prefixes, netbox_next_available_vlans,
+  netbox_next_available_asns, netbox_vlan_lookup,
   netbox_change_history, netbox_journal, netbox_data_hygiene.
 - netbox_list_objects / netbox_get_object work for any object type ('dcim.devices', 'ipam.prefixes', ...).
 - Not sure of a type, field or filter name? netbox_get_definition and netbox_search_spec describe the API.
@@ -53,8 +54,8 @@ and whether write tools are enabled on this server.
 
 WRITE_INSTRUCTIONS = """
 Writes are ENABLED: netbox_create_object, netbox_update_object, netbox_delete_object,
-netbox_allocate_ips, netbox_allocate_prefix, netbox_add_journal_entry, and non-GET netbox_api_call
-change live data.
+netbox_allocate_ips, netbox_allocate_prefix, netbox_allocate_vlans, netbox_allocate_asns,
+netbox_connect_cable, netbox_add_journal_entry, and non-GET netbox_api_call change live data.
 Look objects up first, confirm destructive changes with the user, and prefer the allocate tools
 over picking addresses yourself (they are atomic).
 """

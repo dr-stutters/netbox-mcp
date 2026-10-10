@@ -12,16 +12,24 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from netbox_mcp.config import Settings
-from netbox_mcp.deps import get_netbox
+from netbox_mcp.deps import get_netbox, get_schema
 from netbox_mcp.errors import InvalidRequest
 from netbox_mcp.formatting import compact, compact_dict
-from netbox_mcp.tools.common import choice, label, resolve_prefix
+from netbox_mcp.tools.common import choice, label, resolve_ip_pool, resolve_object, resolve_prefix
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)
 
 PrefixArg = Annotated[
     str | int, Field(description="Prefix in CIDR form (e.g. 10.0.0.0/24) or its numeric id.")
 ]
+IpRangeArg = Annotated[
+    str | int | None,
+    Field(
+        description="IP range to look in: its id, any address inside it, or 'start-end'. Use this or prefix."
+    ),
+]
+VlanGroupArg = Annotated[str | int, Field(description="VLAN group name, slug or id.")]
+AsnRangeArg = Annotated[str | int, Field(description="ASN range name, slug or id.")]
 VrfArg = Annotated[
     str | int | None,
     Field(description="VRF name, RD or id, to pick between identical prefixes in different VRFs."),
@@ -108,20 +116,49 @@ def register(mcp: FastMCP, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def netbox_next_available_ips(
         ctx: Context,
-        prefix: PrefixArg,
+        prefix: Annotated[
+            str | int | None, Field(description="Prefix (CIDR or id) to look in. Use this or ip_range.")
+        ] = None,
+        ip_range: IpRangeArg = None,
         count: Annotated[int, Field(ge=1, le=100)] = 1,
         vrf: VrfArg = None,
     ) -> dict[str, Any]:
-        """Peek at the next free IP addresses in a prefix (read-only: nothing is reserved)."""
+        """Peek at the next free IP addresses in a prefix or an IP range (read-only: nothing is
+        reserved)."""
         nb = get_netbox(ctx)
-        p = await resolve_prefix(nb, prefix, vrf)
-        free = await nb.get(f"ipam/prefixes/{p['id']}/available-ips/", {"limit": count})
+        path, kind, pool = await resolve_ip_pool(nb, prefix, ip_range, vrf)
+        free = await nb.get(f"{path}available-ips/", {"limit": count})
         return {
-            "prefix": p["prefix"],
-            "prefix_id": p["id"],
-            "vrf": label(p.get("vrf")) or "global",
+            kind: label(pool),
+            f"{kind}_id": pool["id"],
+            "vrf": label(pool.get("vrf")) or "global",
             "available": [f["address"] for f in free[:count]],
         }
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def netbox_next_available_vlans(
+        ctx: Context,
+        group: VlanGroupArg,
+        count: Annotated[int, Field(ge=1, le=100)] = 1,
+    ) -> dict[str, Any]:
+        """Peek at the next free VLAN IDs in a VLAN group, within its allowed VID ranges
+        (read-only: nothing is reserved)."""
+        nb = get_netbox(ctx)
+        g = await resolve_object(nb, (await get_schema(ctx)).resolve_type("ipam.vlan-groups"), group)
+        free = await nb.get(f"ipam/vlan-groups/{g['id']}/available-vlans/", {"limit": count})
+        return {"group": label(g), "group_id": g["id"], "available": [v["vid"] for v in free[:count]]}
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def netbox_next_available_asns(
+        ctx: Context,
+        asn_range: AsnRangeArg,
+        count: Annotated[int, Field(ge=1, le=100)] = 1,
+    ) -> dict[str, Any]:
+        """Peek at the next free AS numbers in an ASN range (read-only: nothing is reserved)."""
+        nb = get_netbox(ctx)
+        r = await resolve_object(nb, (await get_schema(ctx)).resolve_type("ipam.asn-ranges"), asn_range)
+        free = await nb.get(f"ipam/asn-ranges/{r['id']}/available-asns/", {"limit": count})
+        return {"asn_range": label(r), "asn_range_id": r["id"], "available": [a["asn"] for a in free[:count]]}
 
     @mcp.tool(annotations=READ_ONLY)
     async def netbox_next_available_prefixes(

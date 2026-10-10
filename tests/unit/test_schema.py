@@ -23,6 +23,8 @@ def test_indexes_model_list_endpoints_only() -> None:
         "dcim.sites",
         "dcim.locations",
         "dcim.racks",
+        "ipam.vlan-groups",
+        "ipam.asn-ranges",
         "core.object-changes",
         "extras.journal-entries",
     }

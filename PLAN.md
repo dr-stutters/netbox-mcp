@@ -70,12 +70,12 @@ entry can be added to and read back from a device.
 |---|---|---|
 | `netbox_data_hygiene` | IPs, prefixes, devices, interfaces, VLANs, cables | Configurable checks, optionally scoped to a site or tenant: duplicate IPs (per VRF), active devices without a primary IP, IPs not inside any prefix, prefixes over a utilisation threshold, VLANs with no prefixes or interfaces, enabled uplinks without cables, devices with no site position or serial, interfaces without descriptions. Returns counts plus the first N offenders per check. |
 
-### 2.5 More allocation & cabling writes
+### 2.5 More allocation & cabling writes ✅
 
 | Tool | API | Notes |
 |---|---|---|
-| `netbox_next_available_vlans` / `netbox_allocate_vlan` *(write)* | `ipam/vlan-groups/{id}/available-vlans/` | Peek at and reserve the next free VID in a group |
-| `netbox_next_available_asns` / `netbox_allocate_asn` *(write)* | `ipam/asn-ranges/{id}/available-asns/` | The same for ASNs |
+| `netbox_next_available_vlans` / `netbox_allocate_vlans` *(write)* | `ipam/vlan-groups/{id}/available-vlans/` | Peek at and reserve the next free VID in a group |
+| `netbox_next_available_asns` / `netbox_allocate_asns` *(write)* | `ipam/asn-ranges/{id}/available-asns/` | The same for ASNs |
 | IP-range support in IP tools | `ipam/ip-ranges/{id}/available-ips/` | `netbox_next_available_ips` / `netbox_allocate_ips` accept a range as well as a prefix |
 | `netbox_connect_cable` *(write)* | `dcim/cables/` | Connect by names: "lab-sw1 Gi1/0/5 → lab-pp1 FP2". Resolves port types, refuses ports that are already cabled, and sets label/type/colour/length |
 

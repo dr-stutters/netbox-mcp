@@ -137,3 +137,31 @@ async def test_data_hygiene_finds_planted_problems(client: Client[Any]) -> None:
         )
         await call(client, "netbox_delete_object", object_type="vrfs", ids=[vrf["id"]])
         await call(client, "netbox_delete_object", object_type="dcim.interfaces", ids=[trunk["id"]])
+
+
+async def test_allocations_and_connect_cable(client: Client[Any]) -> None:
+    ip = await call(client, "netbox_allocate_ips", ip_range="10.99.20.100", status="dhcp", tags=["mcp-test"])
+    vlan = await call(client, "netbox_allocate_vlans", group="mcp-lab", names=["IT-TEMP"], tags=["mcp-test"])
+    asn = await call(client, "netbox_allocate_asns", asn_range="mcp-lab-asns", tags=["mcp-test"])
+    cable = await call(
+        client,
+        "netbox_connect_cable",
+        a_device="lab-sw1",
+        a_port="Gi1/0/2",
+        b_device="lab-sw2",
+        b_port="Gi1/0/2",
+        cable_label="MCP-IT",
+        tags=["mcp-test"],
+    )
+    try:
+        assert ip["allocated"][0]["address"].startswith("10.99.20.1")
+        assert vlan["allocated"][0]["name"] == "IT-TEMP"
+        assert asn["allocated"][0]["asn"] == 64513
+        assert cable["path_far_end"] == "lab-sw2 GigabitEthernet1/0/2 (interface)"
+        peer = await call(client, "netbox_whats_connected", device="lab-sw2", interface="Gi1/0/2")
+        assert peer["far_end"][0]["device"] == "lab-sw1"
+    finally:
+        await call(client, "netbox_delete_object", object_type="dcim.cables", ids=[cable["cable"]["id"]])
+        await call(client, "netbox_delete_object", object_type="ip-addresses", ids=[ip["allocated"][0]["id"]])
+        await call(client, "netbox_delete_object", object_type="vlans", ids=[vlan["allocated"][0]["id"]])
+        await call(client, "netbox_delete_object", object_type="asns", ids=[asn["allocated"][0]["id"]])
