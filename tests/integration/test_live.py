@@ -142,3 +142,12 @@ async def test_data_hygiene(client: Client[Any]) -> None:
     assert out["checks_run"] == 10
     unused = out["problems"].get("prefixes_unused", {}).get("examples", [])
     assert any(u.startswith("10.99.20.0/24") for u in unused)  # SERVERS has no IPs in the seed
+
+
+async def test_next_available_vlans_asns_and_range_ips(client: Client[Any]) -> None:
+    vlans = await call(client, "netbox_next_available_vlans", group="mcp-lab", count=2)
+    assert len(vlans["available"]) == 2 and 10 not in vlans["available"]
+    asns = await call(client, "netbox_next_available_asns", asn_range="mcp-lab-asns")
+    assert asns["available"] == [64513]  # 64512 is taken in the seed
+    ips = await call(client, "netbox_next_available_ips", ip_range="10.99.20.125")
+    assert ips["available"] == ["10.99.20.100/24"]

@@ -183,6 +183,27 @@ class Seeder:
             {"vrf": vrf["id"], "status": "active", **scope, "description": "rtr1-sw2"},
         )
 
+        # A DHCP range inside SERVERS, and a private ASN range with its first ASN in use.
+        await self.ensure(
+            "ipam/ip-ranges/",
+            {"start_address": "10.99.20.100/24", "vrf_id": vrf["id"]},
+            {
+                "end_address": "10.99.20.150/24",
+                "vrf": vrf["id"],
+                "status": "active",
+                "description": "DHCP pool",
+            },
+        )
+        rir = await self.ensure(
+            "ipam/rirs/", {"slug": "mcp-private"}, {"name": "MCP Private", "is_private": True}
+        )
+        await self.ensure(
+            "ipam/asn-ranges/",
+            {"slug": "mcp-lab-asns"},
+            {"name": "MCP Lab ASNs", "rir": rir["id"], "start": 64512, "end": 64520},
+        )
+        await self.ensure("ipam/asns/", {"asn": 64512}, {"rir": rir["id"], "description": "MCP Lab core"})
+
         # --- Interfaces ---
         async def iface(dev: str, name: str, itype: str, **extra: Any) -> dict[str, Any]:
             return await self.ensure(
@@ -360,7 +381,11 @@ class Seeder:
             "ipam/prefixes/",
             "ipam/vlans/",
             "ipam/vlan-groups/",
+            "ipam/ip-ranges/",
             "ipam/vrfs/",
+            "ipam/asns/",
+            "ipam/asn-ranges/",
+            "ipam/rirs/",
             "dcim/device-types/",
             "dcim/platforms/",
             "dcim/manufacturers/",

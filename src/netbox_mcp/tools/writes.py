@@ -20,7 +20,8 @@ from netbox_mcp.deps import current_caller, get_netbox, get_schema
 from netbox_mcp.errors import InvalidRequest
 from netbox_mcp.formatting import compact, list_result, object_result
 from netbox_mcp.schema import ObjectType
-from netbox_mcp.tools.common import label, resolve_interface, resolve_prefix
+from netbox_mcp.tools.cabling import PortType, is_endpoint, port_path, resolve_port, terms_label
+from netbox_mcp.tools.common import label, resolve_interface, resolve_ip_pool, resolve_object, resolve_prefix
 from netbox_mcp.tools.generic import ObjectTypeArg
 
 audit = logging.getLogger("netbox_mcp.audit")
@@ -169,7 +170,13 @@ def register(mcp: FastMCP, settings: Settings) -> None:
     @mcp.tool(annotations=CREATE)
     async def netbox_allocate_ips(
         ctx: Context,
-        prefix: Annotated[str | int, Field(description="Prefix (CIDR or id) to allocate from.")],
+        prefix: Annotated[
+            str | int | None, Field(description="Prefix (CIDR or id) to allocate from. Use this or ip_range.")
+        ] = None,
+        ip_range: Annotated[
+            str | int | None,
+            Field(description="IP range to allocate from: id, any address inside it, or 'start-end'."),
+        ] = None,
         count: Annotated[int, Field(ge=1, le=100)] = 1,
         vrf: Annotated[
             str | int | None, Field(description="VRF name/RD/id if the prefix exists in several.")
@@ -190,8 +197,8 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         ] = False,
         tags: TagsArg = None,
     ) -> dict[str, Any]:
-        """Reserve the next free IP(s) in a prefix (atomic in NetBox, so safe against races).
-        Optionally assign the IP to an interface and set it as the host's primary IP."""
+        """Reserve the next free IP(s) in a prefix or IP range (atomic in NetBox, so safe against
+        races). Optionally assign the IP to an interface and set it as the host's primary IP."""
         if (device is None) != (interface is None):
             raise InvalidRequest("Pass both device and interface to assign the IP, or neither.")
         if device and count != 1:
@@ -201,7 +208,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         if dns_name and count != 1:
             raise InvalidRequest("dns_name only works when allocating a single IP.")
         nb = get_netbox(ctx)
-        p = await resolve_prefix(nb, prefix, vrf)
+        pool_path, pool_kind, pool = await resolve_ip_pool(nb, prefix, ip_range, vrf)
 
         item: dict[str, Any] = {"status": status}
         if description:
@@ -220,13 +227,15 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             host_id = (iface.get("device") or iface.get("virtual_machine") or {}).get("id")
 
         created = await nb.request(
-            "POST", f"ipam/prefixes/{p['id']}/available-ips/", json=[_normalise(item) for _ in range(count)]
+            "POST", f"{pool_path}available-ips/", json=[_normalise(item) for _ in range(count)]
         )
         created = created if isinstance(created, list) else [created]
-        audit.info("caller=%s allocate ip prefix=%s ids=%s", current_caller(), p["prefix"], _ids(created))
+        audit.info(
+            "caller=%s allocate ip %s=%s ids=%s", current_caller(), pool_kind, label(pool), _ids(created)
+        )
 
         out: dict[str, Any] = {
-            "prefix": p["prefix"],
+            pool_kind: label(pool),
             "allocated": [
                 compact({k: ip.get(k) for k in ("id", "address", "status", "dns_name", "vrf")})
                 for ip in created
@@ -286,3 +295,178 @@ def register(mcp: FastMCP, settings: Settings) -> None:
                 compact({k: c.get(k) for k in ("id", "prefix", "status", "vrf", "vlan")}) for c in created
             ],
         }
+
+    @mcp.tool(annotations=CREATE)
+    async def netbox_allocate_vlans(
+        ctx: Context,
+        group: Annotated[str | int, Field(description="VLAN group name, slug or id.")],
+        names: Annotated[
+            list[str],
+            Field(description="One VLAN is created per name, e.g. ['GUEST'].", min_length=1, max_length=50),
+        ],
+        status: Annotated[str, Field(description="active, reserved or deprecated.")] = "active",
+        description: str | None = None,
+        tags: TagsArg = None,
+    ) -> dict[str, Any]:
+        """Create VLANs with the next free VIDs in a VLAN group (atomic in NetBox). NetBox needs a name
+        for each VLAN, so pass one name per VLAN wanted."""
+        nb = get_netbox(ctx)
+        g = await resolve_object(nb, (await get_schema(ctx)).resolve_type("ipam.vlan-groups"), group)
+        items = []
+        for name in names:
+            item: dict[str, Any] = {"name": name, "status": status}
+            if description:
+                item["description"] = description
+            if tags:
+                item["tags"] = tags
+            items.append(_normalise(item))
+        created = await nb.request("POST", f"ipam/vlan-groups/{g['id']}/available-vlans/", json=items)
+        created = created if isinstance(created, list) else [created]
+        audit.info("caller=%s allocate vlan group=%s ids=%s", current_caller(), label(g), _ids(created))
+        return {
+            "group": label(g),
+            "allocated": [{"id": v["id"], "vid": v["vid"], "name": v["name"]} for v in created],
+        }
+
+    @mcp.tool(annotations=CREATE)
+    async def netbox_allocate_asns(
+        ctx: Context,
+        asn_range: Annotated[str | int, Field(description="ASN range name, slug or id.")],
+        count: Annotated[int, Field(ge=1, le=50)] = 1,
+        description: str | None = None,
+        tags: TagsArg = None,
+    ) -> dict[str, Any]:
+        """Reserve the next free AS number(s) from an ASN range (atomic in NetBox)."""
+        nb = get_netbox(ctx)
+        r = await resolve_object(nb, (await get_schema(ctx)).resolve_type("ipam.asn-ranges"), asn_range)
+        item: dict[str, Any] = {}
+        if description:
+            item["description"] = description
+        if tags:
+            item["tags"] = tags
+        created = await nb.request(
+            "POST",
+            f"ipam/asn-ranges/{r['id']}/available-asns/",
+            json=[_normalise(item) for _ in range(count)],
+        )
+        created = created if isinstance(created, list) else [created]
+        audit.info("caller=%s allocate asn range=%s ids=%s", current_caller(), label(r), _ids(created))
+        return {"asn_range": label(r), "allocated": [{"id": a["id"], "asn": a["asn"]} for a in created]}
+
+    @mcp.tool(annotations=CREATE)
+    async def netbox_connect_cable(
+        ctx: Context,
+        a_device: Annotated[
+            str | None, Field(description="A-end device name/id (for a circuit termination: the circuit ID).")
+        ] = None,
+        a_port: Annotated[
+            str | None,
+            Field(description="A-end port name, e.g. Gi1/0/5 (for a circuit termination: A or Z)."),
+        ] = None,
+        b_device: Annotated[str | None, Field(description="B-end device name/id (or circuit ID).")] = None,
+        b_port: Annotated[
+            str | None, Field(description="B-end port name (or A/Z for a circuit termination).")
+        ] = None,
+        a_type: PortType = "interface",
+        b_type: PortType = "interface",
+        a_port_id: Annotated[
+            int | None, Field(description="A-end port id, instead of device + port.")
+        ] = None,
+        b_port_id: Annotated[
+            int | None, Field(description="B-end port id, instead of device + port.")
+        ] = None,
+        cable_label: Annotated[str | None, Field(description="Cable label, e.g. 'MCP-010'.")] = None,
+        cable_type: Annotated[
+            str | None, Field(description="e.g. cat6, cat6a, smf, mmf-om4, dac-passive.")
+        ] = None,
+        status: Annotated[str, Field(description="connected, planned or decommissioning.")] = "connected",
+        color: Annotated[str | None, Field(description="Hex colour without '#', e.g. 'ff9800'.")] = None,
+        length: Annotated[float | None, Field(gt=0)] = None,
+        length_unit: Annotated[
+            str | None, Field(description="m, cm, km, ft, in or mi (needed with length).")
+        ] = None,
+        description: str | None = None,
+        tags: TagsArg = None,
+    ) -> dict[str, Any]:
+        """Connect two ports with a new cable, by name: e.g. lab-sw1 Gi1/0/5 -> lab-pp1 FP2 (b_type
+        'front-port'). Port types: interface, front-port, rear-port, console-port, console-server-port,
+        power-port, power-outlet, circuit-termination. Refuses ports that are already cabled or marked
+        connected. Returns the new cable and, from the A end, where the path now leads."""
+        if length is not None and not length_unit:
+            raise InvalidRequest("length needs length_unit (e.g. 'm').")
+        nb = get_netbox(ctx)
+
+        async def end(kind: str, device: str | None, port: str | None, port_id: int | None) -> dict[str, Any]:
+            if kind == "circuit-termination":
+                return await resolve_port(nb, kind, None, None, port_id, device, (port or "A").upper())
+            return await resolve_port(nb, kind, device, port, port_id, None, "A")
+
+        a = await end(a_type, a_device, a_port, a_port_id)
+        b = await end(b_type, b_device, b_port, b_port_id)
+        a_ct, b_ct = PORT_CONTENT_TYPES[a_type], PORT_CONTENT_TYPES[b_type]
+        if (a_ct, a["id"]) == (b_ct, b["id"]):
+            raise InvalidRequest("Both ends are the same port.")
+        for side, port, kind in (("A", a, a_type), ("B", b, b_type)):
+            if port.get("cable"):
+                peers = terms_label(port.get("link_peers")) or "?"
+                raise InvalidRequest(
+                    f"{side} end {_port_label(port, kind)} already has cable {label(port['cable'])} "
+                    f"(to {peers}). Remove that cable first."
+                )
+            if port.get("mark_connected"):
+                raise InvalidRequest(
+                    f"{side} end {_port_label(port, kind)} is marked as connected. Clear that first."
+                )
+
+        body: dict[str, Any] = {
+            "a_terminations": [{"object_type": a_ct, "object_id": a["id"]}],
+            "b_terminations": [{"object_type": b_ct, "object_id": b["id"]}],
+            "status": status,
+        }
+        for key, value in (
+            ("label", cable_label),
+            ("type", cable_type),
+            ("color", color),
+            ("length", length),
+            ("length_unit", length_unit),
+            ("description", description),
+            ("tags", tags),
+        ):
+            if value is not None:
+                body[key] = value
+        cable = await nb.request("POST", "dcim/cables/", json=_normalise(body))
+        a_label, b_label = _port_label(a, a_type), _port_label(b, b_type)
+        audit.info("caller=%s connect cable id=%s %s <-> %s", current_caller(), cable["id"], a_label, b_label)
+
+        out: dict[str, Any] = {
+            "cable": compact({k: cable.get(k) for k in ("id", "label", "type", "status", "color", "length")}),
+            "a": a_label,
+            "b": b_label,
+        }
+        if a_type in TRACEABLE:
+            segments = await nb.get(f"{port_path(a_type)}{a['id']}/trace/") or []
+            if segments:
+                far = segments[-1][2] or []
+                out["path_far_end"] = terms_label(far)
+                out["path_complete"] = is_endpoint(far)
+        return out
+
+
+PORT_CONTENT_TYPES = {
+    "interface": "dcim.interface",
+    "front-port": "dcim.frontport",
+    "rear-port": "dcim.rearport",
+    "console-port": "dcim.consoleport",
+    "console-server-port": "dcim.consoleserverport",
+    "power-port": "dcim.powerport",
+    "power-outlet": "dcim.poweroutlet",
+    "power-feed": "dcim.powerfeed",
+    "circuit-termination": "circuits.circuittermination",
+}
+TRACEABLE = {"interface", "console-port", "console-server-port", "power-port", "power-outlet", "power-feed"}
+
+
+def _port_label(port: dict[str, Any], kind: str) -> str:
+    if kind == "circuit-termination":
+        return f"{label(port.get('circuit'))} term {port.get('term_side')} (circuit-termination)"
+    return f"{label(port.get('device'))} {port.get('name')} ({kind})"

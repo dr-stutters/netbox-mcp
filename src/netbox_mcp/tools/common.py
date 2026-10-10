@@ -174,3 +174,49 @@ async def resolve_object(nb: NetBoxClient, otype: ObjectType, ref: str | int) ->
             options = "; ".join(f"id={o['id']} ({label(o)})" for o in objs)
             raise InvalidRequest(f"{otype.key} {ref!r} is ambiguous: {options}. Pass the id instead.")
     raise InvalidRequest(f"No {otype.key} matching {ref!r}. Try netbox_search, or pass the id.")
+
+
+async def resolve_ip_range(nb: NetBoxClient, ref: str | int, vrf: str | int | None = None) -> dict[str, Any]:
+    """An IP range by id, by any address inside it, or as 'start-end' (the start address is used)."""
+    if isinstance(ref, int) or str(ref).isdigit():
+        return await nb.get_object(f"ipam/ip-ranges/{int(ref)}/")
+    host = str(ref).split("-", 1)[0].strip()
+    try:
+        address = ipaddress.ip_interface(host).ip
+    except ValueError as e:
+        raise InvalidRequest(f"{ref!r} is not an IP range id, an address, or 'start-end'.") from e
+    vrf_id = await resolve_vrf(nb, vrf)
+    # NetBox's `contains` filter on ranges only matches when the mask matches too, so search the
+    # ranges under the outermost prefix holding the address and compare bounds here.
+    parents, _ = await nb.list("ipam/prefixes/", {"contains": str(address)}, limit=200)
+    params: dict[str, Any] = {}
+    if parents:
+        outer = min((ipaddress.ip_network(p["prefix"]) for p in parents), key=lambda n: n.prefixlen)
+        params["parent"] = str(outer)
+    if vrf_id is not None:
+        params["vrf_id"] = vrf_id
+    candidates, _ = await nb.list("ipam/ip-ranges/", params, limit=1000)
+    found = [r for r in candidates if _range_contains(r, address)]
+    if not found:
+        raise InvalidRequest(f"No IP range contains {address}{' in that VRF' if vrf_id else ''}.")
+    if len(found) > 1:
+        raise _ambiguous("IP range", ref, found, "vrf")
+    return found[0]
+
+
+def _range_contains(r: dict[str, Any], address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    start, end = ipaddress.ip_interface(r["start_address"]).ip, ipaddress.ip_interface(r["end_address"]).ip
+    return start.version == address.version and int(start) <= int(address) <= int(end)
+
+
+async def resolve_ip_pool(
+    nb: NetBoxClient, prefix: str | int | None, ip_range: str | int | None, vrf: str | int | None
+) -> tuple[str, str, dict[str, Any]]:
+    """The source of free IPs: a prefix or an IP range. Returns (api path, kind, object)."""
+    if (prefix is None) == (ip_range is None):
+        raise InvalidRequest("Pass exactly one of prefix or ip_range.")
+    if prefix is not None:
+        p = await resolve_prefix(nb, prefix, vrf)
+        return f"ipam/prefixes/{p['id']}/", "prefix", p
+    r = await resolve_ip_range(nb, ip_range, vrf)  # type: ignore[arg-type]
+    return f"ipam/ip-ranges/{r['id']}/", "ip_range", r

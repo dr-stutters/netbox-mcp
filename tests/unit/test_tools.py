@@ -69,7 +69,13 @@ async def test_not_found_message(settings: Settings, netbox: respx.MockRouter) -
 async def test_list_object_types(settings: Settings, netbox: respx.MockRouter) -> None:
     async with Client(create_server(settings)) as client:
         res = await client.call_tool("netbox_list_object_types", {"app": "ipam"})
-    assert res.structured_content == {"ipam": {"prefixes": "prefix objects"}}
+    assert res.structured_content == {
+        "ipam": {
+            "asn-ranges": "ASN range objects",
+            "prefixes": "prefix objects",
+            "vlan-groups": "VLAN group objects",
+        }
+    }
 
 
 async def test_api_call_read_only_by_default(settings: Settings, netbox: respx.MockRouter) -> None:

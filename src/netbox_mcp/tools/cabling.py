@@ -31,7 +31,7 @@ _PORT_PATHS = {
 }
 
 
-def _port_path(port_type: str) -> str:
+def port_path(port_type: str) -> str:
     return _PORT_PATHS.get(port_type, f"dcim/{port_type}s/")
 
 
@@ -44,14 +44,14 @@ def _term_type(t: dict[str, Any]) -> str:
     return name[:-1] if name.endswith("s") else name
 
 
-def _term_label(t: dict[str, Any]) -> str:
+def term_label(t: dict[str, Any]) -> str:
     owner = t.get("device") or t.get("circuit") or t.get("power_panel") or {}
     name = t.get("name") or (f"term {t['term_side']}" if t.get("term_side") else label(t))
     return f"{' '.join(x for x in (label(owner), name) if x)} ({_term_type(t)})"
 
 
-def _terms(ts: list[dict[str, Any]] | None) -> str | None:
-    return ", ".join(_term_label(t) for t in ts) if ts else None
+def terms_label(ts: list[dict[str, Any]] | None) -> str | None:
+    return ", ".join(term_label(t) for t in ts) if ts else None
 
 
 def _cable(c: dict[str, Any] | None) -> str | None:
@@ -81,11 +81,11 @@ def route(elements: list[list[dict[str, Any]]]) -> list[str]:
         if _term_type(group[0]) == "cable":
             steps.append("cable " + ", ".join(_cable(c) or "?" for c in group))
         else:
-            steps.append(_terms(group) or "?")
+            steps.append(terms_label(group) or "?")
     return steps
 
 
-async def _resolve_port(
+async def resolve_port(
     nb: NetBoxClient,
     port_type: str,
     device: str | None,
@@ -94,7 +94,7 @@ async def _resolve_port(
     circuit: str | None,
     side: str,
 ) -> dict[str, Any]:
-    path = _port_path(port_type)
+    path = port_path(port_type)
     if port_type == "interface":
         _, origin = await resolve_interface(
             nb, host=device, interface=port, interface_id=port_id, kind="device"
@@ -146,9 +146,9 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         hop (from -> cable -> to), through patch panels and circuits. From a patch-panel front/rear
         port or a circuit termination: every path that passes through it, end to end."""
         nb = get_netbox(ctx)
-        origin = await _resolve_port(nb, port_type, device, port, port_id, circuit, side)
+        origin = await resolve_port(nb, port_type, device, port, port_id, circuit, side)
         origin_label = _origin_label(origin, port_type)
-        path = _port_path(port_type)
+        path = port_path(port_type)
 
         if port_type in ("front-port", "rear-port", "circuit-termination"):
             cable_paths: list[dict[str, Any]] = await nb.get(f"{path}{origin['id']}/paths/") or []
@@ -188,7 +188,8 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             }
 
         hops = [
-            {"from": _terms(near), "cable": _cable(cable), "to": _terms(far)} for near, cable, far in segments
+            {"from": terms_label(near), "cable": _cable(cable), "to": terms_label(far)}
+            for near, cable, far in segments
         ]
         last_far = segments[-1][2] or []
         complete = is_endpoint(last_far)
@@ -196,7 +197,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             "origin": origin_label,
             "cabled": True,
             "complete": complete,
-            "far_end": _terms(last_far),
+            "far_end": terms_label(last_far),
             "hop_count": len(hops),
             "hops": [{k: v for k, v in h.items() if v} for h in hops],
         }
@@ -232,7 +233,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             "connected": bool(endpoints),
             "reachable": iface.get("connected_endpoints_reachable"),
             "cable": label(iface.get("cable")),
-            "direct_peer": _terms(iface.get("link_peers")),
+            "direct_peer": terms_label(iface.get("link_peers")),
         }
         if not endpoints:
             out["note"] = "Cabled, but the path doesn't reach an endpoint (e.g. it stops at a patch panel)."
@@ -264,7 +265,8 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             out["far_end"] = far
         else:
             out["far_end"] = [
-                {"endpoint": _terms([e]), "type": iface.get("connected_endpoints_type")} for e in endpoints
+                {"endpoint": terms_label([e]), "type": iface.get("connected_endpoints_type")}
+                for e in endpoints
             ]
         peers = {(iface.get("link_peers_type"), p.get("id")) for p in iface.get("link_peers") or []}
         if peers == {(iface.get("connected_endpoints_type"), e.get("id")) for e in endpoints}:
