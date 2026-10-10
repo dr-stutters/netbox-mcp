@@ -240,8 +240,14 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `netbox_service_lookup` | What listens on a port, or what runs on a host: protocol, ports, host and IPs |
 | `netbox_tenant_summary` | Everything a tenant owns (counts and examples per type) and its contacts |
 | `netbox_contacts_for` | Who to contact about an object (role, priority, email, phone), including contacts inherited from its site and tenant |
+| `netbox_topology` | Who connects to whom around a device (N hops) or across a site, through patch panels, as a Mermaid diagram plus edge list |
+| `netbox_impact_analysis` | What breaks if a device goes down: single-homed neighbours, hosted VMs, circuits, tunnels, gateway subnets without FHRP, devices losing power, services |
+| `netbox_compare` | Field-by-field differences between two objects; for devices also interfaces only on one side or configured differently |
 | `netbox_change_history` | Who changed what and when: filter by object (including its interfaces), user, action and time (`since="7d"`). Updates show only the fields that changed, with references shown by name |
 | `netbox_journal` | Journal notes on an object, or the latest notes across NetBox |
+
+Objects can be referenced by name (or address, prefix, label, …), by numeric id, or explicitly as
+`field=value`, e.g. `vid=10` for a VLAN by VID.
 
 ### Any object type
 

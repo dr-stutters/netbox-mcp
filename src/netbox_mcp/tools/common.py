@@ -160,14 +160,22 @@ def content_type(otype: ObjectType) -> str:
 
 
 async def resolve_object(nb: NetBoxClient, otype: ObjectType, ref: str | int) -> dict[str, Any]:
-    """Find one object of any type by id, or by its natural key (name, address, prefix, label, ...)."""
+    """Find one object of any type by id, by an explicit 'field=value' filter (e.g. 'vid=10'), or by
+    its natural key (name, address, prefix, label, ...)."""
     if isinstance(ref, int) or str(ref).isdigit():
         return await nb.get_object(f"{otype.path}{int(ref)}/")
     available = otype.filter_names()
-    for key in _NATURAL_KEYS:
+    text = str(ref)
+    if "=" in text:
+        key, _, value = text.partition("=")
+        key = key.strip()
         if key not in available:
-            continue
-        objs, count = await nb.list(otype.path, {key: ref}, limit=10)
+            raise InvalidRequest(f"{otype.key} can't be looked up by {key!r}; try its name or id.")
+        candidates: tuple[tuple[str, str], ...] = ((key, value.strip()),)
+    else:
+        candidates = tuple((k, text) for k in _NATURAL_KEYS if k in available)
+    for key, value in candidates:
+        objs, count = await nb.list(otype.path, {key: value}, limit=10)
         if count == 1:
             return objs[0]
         if count > 1:
