@@ -25,6 +25,9 @@ def test_indexes_model_list_endpoints_only() -> None:
         "dcim.racks",
         "ipam.vlan-groups",
         "ipam.asn-ranges",
+        "virtualization.clusters",
+        "tenancy.tenants",
+        "circuits.circuits",
         "core.object-changes",
         "extras.journal-entries",
     }

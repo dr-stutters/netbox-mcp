@@ -84,6 +84,9 @@ MINI_SPEC: dict[str, Any] = {
         "/api/dcim/racks/": _list_endpoint("Rack", "rack", ["name", "site_id", "location_id"], None),
         "/api/ipam/vlan-groups/": _list_endpoint("VLANGroup", "VLAN group", ["name", "slug"], None),
         "/api/ipam/asn-ranges/": _list_endpoint("ASNRange", "ASN range", ["name", "slug"], None),
+        "/api/virtualization/clusters/": _list_endpoint("Cluster", "cluster", ["name"], None),
+        "/api/tenancy/tenants/": _list_endpoint("Tenant", "tenant", ["name", "slug"], None),
+        "/api/circuits/circuits/": _list_endpoint("Circuit", "circuit", ["cid"], None),
         "/api/core/object-changes/": _list_endpoint(
             "ObjectChange",
             "object change",
@@ -139,6 +142,9 @@ MINI_SPEC: dict[str, Any] = {
             "Rack": {"type": "object", "properties": {}},
             "VLANGroup": {"type": "object", "properties": {}},
             "ASNRange": {"type": "object", "properties": {}},
+            "Cluster": {"type": "object", "properties": {}},
+            "Tenant": {"type": "object", "properties": {}},
+            "Circuit": {"type": "object", "properties": {}},
             "ObjectChange": {"type": "object", "properties": {}},
             "JournalEntry": {"type": "object", "properties": {}},
             "WritableJournalEntryRequest": {

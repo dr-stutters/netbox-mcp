@@ -236,6 +236,10 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `netbox_l2vpn_summary` | An L2VPN (by name, slug or identifier/VNI) with its VLAN, interface and VM-interface members; or list all |
 | `netbox_wireless_lookup` | SSIDs with VLAN, security type and the APs serving them |
 | `netbox_power_trace` | A device's power chain: PSU → PDU outlet → PDU inlet → feed → panel, plus the rack's power budget |
+| `netbox_cluster_summary` | A virtualization cluster: hosts, VMs by status and per host, allocated vCPU/memory/disk; or list all clusters |
+| `netbox_service_lookup` | What listens on a port, or what runs on a host: protocol, ports, host and IPs |
+| `netbox_tenant_summary` | Everything a tenant owns (counts and examples per type) and its contacts |
+| `netbox_contacts_for` | Who to contact about an object (role, priority, email, phone), including contacts inherited from its site and tenant |
 | `netbox_change_history` | Who changed what and when: filter by object (including its interfaces), user, action and time (`since="7d"`). Updates show only the fields that changed, with references shown by name |
 | `netbox_journal` | Journal notes on an object, or the latest notes across NetBox |
 
