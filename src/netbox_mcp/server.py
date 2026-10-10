@@ -14,7 +14,7 @@ from netbox_mcp.client import NetBoxClient
 from netbox_mcp.config import Settings
 from netbox_mcp.errors import NetBoxError
 from netbox_mcp.schema import SchemaStore
-from netbox_mcp.tools import cabling, devices, generic, ipam, search, spec, system
+from netbox_mcp.tools import cabling, devices, generic, ipam, search, spec, system, writes
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +29,13 @@ cables, IP addresses, prefixes, VLANs, VRFs and virtual machines.
 - netbox_api_call reaches any endpoint the other tools don't cover.
 Call netbox_status if anything fails; it reports the NetBox version, the API user,
 and whether write tools are enabled on this server.
+"""
+
+WRITE_INSTRUCTIONS = """
+Writes are ENABLED: netbox_create_object, netbox_update_object, netbox_delete_object,
+netbox_allocate_ips, netbox_allocate_prefix, and non-GET netbox_api_call change live data.
+Look objects up first, confirm destructive changes with the user, and prefer the allocate tools
+over picking addresses yourself (they are atomic).
 """
 
 
@@ -57,13 +64,14 @@ def create_server(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
         finally:
             await client.aclose()
 
+    instructions = INSTRUCTIONS + (WRITE_INSTRUCTIONS if settings.netbox_mcp_enable_writes else "")
     mcp: FastMCP = FastMCP(
         name="netbox",
-        instructions=INSTRUCTIONS,
+        instructions=instructions,
         lifespan=netbox_lifespan,
         mask_error_details=False,
     )
 
-    for module in (system, search, devices, cabling, ipam, generic, spec):
+    for module in (system, search, devices, cabling, ipam, generic, spec, writes):
         module.register(mcp, settings)
     return mcp
