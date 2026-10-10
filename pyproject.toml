@@ -1,0 +1,49 @@
+[project]
+name = "netbox-mcp"
+version = "0.1.0"
+description = "FastMCP server for NetBox"
+readme = "README.md"
+authors = [
+    { name = "dr-stutters", email = "drstuttersau@gmail.com" }
+]
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "fastmcp>=4.1,<5",
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.15.0",
+]
+
+[project.scripts]
+netbox-mcp = "netbox_mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "respx>=0.23.1",
+    "ruff>=0.17.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests/unit"]
+markers = ["integration: requires a live NetBox (NETBOX_URL/NETBOX_TOKEN)"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ASYNC240"]
+
+[tool.mypy]
+strict = true
+files = ["src"]
