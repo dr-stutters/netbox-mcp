@@ -9,21 +9,12 @@ from typing import Any
 
 import pytest
 from fastmcp import Client
-from pydantic import ValidationError
 
 from netbox_mcp.client import NetBoxClient
 from netbox_mcp.config import Settings
 from netbox_mcp.server import create_server
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture(scope="module")
-def settings() -> Settings:
-    try:
-        return Settings()  # type: ignore[call-arg]
-    except ValidationError:
-        pytest.skip("NETBOX_URL / NETBOX_TOKEN not configured")
 
 
 @pytest.fixture

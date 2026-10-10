@@ -103,6 +103,7 @@ MINI_SPEC: dict[str, Any] = {
                     "site": {
                         "oneOf": [{"type": "integer"}, {"$ref": "#/components/schemas/BriefSiteRequest"}]
                     },
+                    "tags": {"type": "array", "items": {"$ref": "#/components/schemas/NestedTagRequest"}},
                 },
             },
             "BriefSite": {"type": "object", "properties": {"id": {"type": "integer"}}},

@@ -39,6 +39,21 @@ claude mcp add netbox -s user -- uv --directory /path/to/Netbox-MCP run netbox-m
 | `netbox_get_definition` | Fields, enum choices, writable/required fields and filters for a type |
 | `netbox_api_call` | Any REST endpoint (GET only unless writes are enabled) |
 
+### Write tools (only when `NETBOX_MCP_ENABLE_WRITES=true`)
+
+| Tool | Purpose |
+|---|---|
+| `netbox_create_object` | Create one or many objects of any type |
+| `netbox_update_object` | Partial update of one object, or the same change across many |
+| `netbox_delete_object` | Delete by id (all ids must exist, or nothing is deleted) |
+| `netbox_allocate_ips` | Atomically reserve the next free IP(s); optionally assign to an interface and set as primary |
+| `netbox_allocate_prefix` | Atomically carve the next free child prefix(es) of a given length |
+
+With writes enabled, `netbox_api_call` also accepts POST/PUT/PATCH/DELETE. When writes are off, these
+tools are not registered at all. NetBox silently ignores unknown field names on create/update, so the
+server checks every field name against the schema first and suggests corrections for typos. Writes
+are logged to the `netbox_mcp.audit` logger.
+
 Results are compact JSON: URLs, empty values and zero counts are dropped and nested objects are
 reduced to `{id, display}`. Pass `response_format="markdown"` for a table.
 
@@ -60,4 +75,10 @@ Integration tests run read-only checks against a live NetBox seeded with a small
 uv run python scripts/seed_lab.py            # create the lab (safe to re-run)
 uv run pytest tests/integration
 uv run python scripts/seed_lab.py --delete   # remove it again
+```
+
+Write-path integration tests create and delete their own objects, so they are opt-in:
+
+```bash
+NETBOX_MCP_TEST_WRITES=1 uv run pytest tests/integration
 ```

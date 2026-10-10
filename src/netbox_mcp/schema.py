@@ -111,6 +111,23 @@ class SchemaIndex:
             f"Use netbox_get_definition('{otype.key}', section='filters') to list valid filters."
         )
 
+    def check_write_fields(self, otype: ObjectType, names: set[str], *, allow_id: bool = False) -> None:
+        """NetBox silently ignores unknown fields on create/update, so reject them here."""
+        if otype.writable is None or otype.writable not in self.schemas:
+            raise InvalidRequest(f"{otype.key} does not support create/update via the API.")
+        valid = set(self.schemas[otype.writable]["fields"]) | ({"id"} if allow_id else set())
+        bad = sorted(names - valid)
+        if not bad:
+            return
+        problems = []
+        for n in bad:
+            close = difflib.get_close_matches(n, list(valid), n=3, cutoff=0.6)
+            problems.append(f"'{n}'" + (f" (did you mean {', '.join(close)}?)" if close else ""))
+        raise InvalidRequest(
+            f"Unknown field(s) for {otype.key}: {'; '.join(problems)}. "
+            f"Use netbox_get_definition('{otype.key}', section='write') to list writable fields."
+        )
+
     # --- search -------------------------------------------------------------------------
 
     def search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
