@@ -22,6 +22,7 @@ from netbox_mcp.errors import NetBoxError
 from netbox_mcp.schema import SchemaStore
 from netbox_mcp.tools import (
     cabling,
+    config,
     devices,
     generic,
     history,
@@ -44,7 +45,8 @@ cables, IP addresses, prefixes, VLANs, VRFs and virtual machines.
   netbox_site_summary, netbox_rack_elevation, netbox_find_rack_space, netbox_prefix_utilization,
   netbox_next_available_ips, netbox_next_available_prefixes, netbox_next_available_vlans,
   netbox_next_available_asns, netbox_vlan_lookup,
-  netbox_change_history, netbox_journal, netbox_data_hygiene.
+  netbox_change_history, netbox_journal, netbox_data_hygiene, netbox_render_config,
+  netbox_config_context, netbox_custom_fields.
 - netbox_list_objects / netbox_get_object work for any object type ('dcim.devices', 'ipam.prefixes', ...).
 - Not sure of a type, field or filter name? netbox_get_definition and netbox_search_spec describe the API.
 - netbox_api_call reaches any endpoint the other tools don't cover.
@@ -112,6 +114,19 @@ def create_server(settings: Settings, *, auth: AuthProvider | None = None) -> Fa
         """Liveness check for Docker/load balancers. Unauthenticated, so it reveals nothing about NetBox."""
         return JSONResponse({"status": "ok"})
 
-    for module in (system, search, devices, cabling, ipam, sites, history, hygiene, generic, spec, writes):
+    for module in (
+        system,
+        search,
+        devices,
+        cabling,
+        ipam,
+        sites,
+        history,
+        hygiene,
+        config,
+        generic,
+        spec,
+        writes,
+    ):
         module.register(mcp, settings)
     return mcp

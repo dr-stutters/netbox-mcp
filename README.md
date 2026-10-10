@@ -228,6 +228,9 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `netbox_rack_elevation` | What's in a rack, unit by unit: devices and faces, reservations, free ranges, utilisation |
 | `netbox_find_rack_space` | Racks with room for a device of N units (respects reservations, full or half depth) |
 | `netbox_data_hygiene` | Finds data problems: duplicate IPs, IPs outside any prefix, nearly full or unused prefixes, devices without a primary IP or serial, rack devices without a position, unused VLANs, trunks without cables, cabled interfaces without descriptions. Optionally per site |
+| `netbox_render_config` | A device's or VM's intended config, rendered from its config template with its config context |
+| `netbox_config_context` | A device's or VM's merged config context, and which contexts contributed (in merge order, with what they matched on) |
+| `netbox_custom_fields` | Which custom fields exist, their types, choices and object types, and how to filter on them |
 | `netbox_change_history` | Who changed what and when: filter by object (including its interfaces), user, action and time (`since="7d"`). Updates show only the fields that changed, with references shown by name |
 | `netbox_journal` | Journal notes on an object, or the latest notes across NetBox |
 
@@ -236,7 +239,7 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | Tool | What it does |
 |---|---|
 | `netbox_list_object_types` | The ~140 object types the generic tools accept |
-| `netbox_list_objects` | List and filter any type. Filter names are checked |
+| `netbox_list_objects` | List and filter any type. Filter names are checked, including custom-field filters (`cf_<name>`) |
 | `netbox_get_object` | One object by type and ID |
 | `netbox_search_spec` | Keyword search over NetBox's API spec, to find endpoints |
 | `netbox_get_definition` | A type's fields, choice values, required fields and valid filters |
@@ -281,6 +284,7 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `HTTP transport requires MCP_AUTH_TOKENS` | Generate a token (`netbox-mcp token <name>`) and add the entry to `.env` |
 | Client gets `401 Unauthorized` | The header must be exactly `Authorization: Bearer <raw token>`, not the `sha256:` entry |
 | `Unknown filter` / `Unknown field` | Working as intended: NetBox would silently ignore it. Use the suggested name, or check `netbox_get_definition` |
+| `Invalid custom field filter(s)` | NetBox ignores unsupported custom-field lookups (e.g. `cf_<text field>__ic`) and returns everything. Use the form shown in the error or in `netbox_custom_fields`. Loose text fields already match partial text with plain `cf_<name>=part` |
 | Write tools missing | Set `NETBOX_MCP_ENABLE_WRITES=true` and restart. For Claude Code, start a new session |
 | Container not `(healthy)` | Run `docker compose logs` and look for configuration errors at startup |
 

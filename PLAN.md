@@ -79,7 +79,7 @@ entry can be added to and read back from a device.
 | IP-range support in IP tools | `ipam/ip-ranges/{id}/available-ips/` | `netbox_next_available_ips` / `netbox_allocate_ips` accept a range as well as a prefix |
 | `netbox_connect_cable` *(write)* | `dcim/cables/` | Connect by names: "lab-sw1 Gi1/0/5 → lab-pp1 FP2". Resolves port types, refuses ports that are already cabled, and sets label/type/colour/length |
 
-### 2.6 Config rendering & custom fields
+### 2.6 Config rendering & custom fields ✅
 
 | Tool | API | Notes |
 |---|---|---|

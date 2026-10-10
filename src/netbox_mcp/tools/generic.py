@@ -12,6 +12,8 @@ from pydantic import Field
 from netbox_mcp.config import Settings
 from netbox_mcp.deps import get_netbox, get_schema
 from netbox_mcp.formatting import ResponseFormat, list_result, object_result
+from netbox_mcp.tools.common import content_type
+from netbox_mcp.tools.config import check_custom_field_filters
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)
 
@@ -71,7 +73,8 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             Field(
                 description="NetBox filters, e.g. {'site': 'home', 'status': 'active', 'role_id': 3, "
                 "'name__ic': 'core'}. A list value means OR, e.g. {'status': ['active','planned']}. "
-                "Use netbox_get_definition(object_type, section='filters') to see valid filter names."
+                "Use netbox_get_definition(object_type, section='filters') to see valid filter names. "
+                "Custom fields filter as cf_<name> (see netbox_custom_fields)."
             ),
         ] = None,
         q: Annotated[str | None, Field(description="Free-text search within this object type.")] = None,
@@ -87,7 +90,10 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         schema = await get_schema(ctx)
         otype = schema.resolve_type(object_type)
         filters = filters or {}
-        schema.check_filters(otype, list(filters))
+        cf_filters = [n for n in filters if n.startswith("cf_")]
+        schema.check_filters(otype, [n for n in filters if not n.startswith("cf_")])
+        if cf_filters:
+            await check_custom_field_filters(get_netbox(ctx), content_type(otype), cf_filters)
         params: dict[str, Any] = {**filters, **_params(fields, brief)}
         if q:
             params["q"] = q
