@@ -259,6 +259,10 @@ Objects can be referenced by name (or address, prefix, label, …), by numeric i
 | `netbox_search_spec` | Keyword search over NetBox's API spec, to find endpoints |
 | `netbox_get_definition` | A type's fields, choice values, required fields and valid filters |
 | `netbox_api_call` | Any REST endpoint. GET only unless writes are enabled |
+| `netbox_graphql` | Read-only GraphQL, for nested questions in one request (mutations are rejected) |
+| `netbox_export` | Render an export template (CSV, configs, …) over filtered objects, or list the templates for a type |
+| `netbox_list_scripts` | Custom scripts with their inputs and last run |
+| `netbox_job_status` | A background job's status, output and log, or the most recent jobs |
 
 ### Changes (only with `NETBOX_MCP_ENABLE_WRITES=true`)
 
@@ -272,6 +276,7 @@ Objects can be referenced by name (or address, prefix, label, …), by numeric i
 | `netbox_allocate_vlans` | Create VLANs with the next free VIDs in a group (one per name) |
 | `netbox_allocate_asns` | Reserve the next free AS number(s) from an ASN range |
 | `netbox_connect_cable` | Connect two ports by name, e.g. lab-sw1 Gi1/0/5 → lab-pp1 FP2. Works with interfaces, front/rear ports, console, power and circuit terminations. Refuses ports that are already cabled, and reports where the new path leads |
+| `netbox_run_script` | Run a custom script; a dry run by default (NetBox rolls back), `commit=true` to keep changes. Waits for and returns the job's output |
 | `netbox_add_journal_entry` | Add a dated note to any object, e.g. "replaced PSU" (info / success / warning / danger) |
 
 ## Security notes
@@ -324,6 +329,10 @@ uv run pytest tests/integration              # read-only checks
 NETBOX_MCP_TEST_WRITES=1 uv run pytest tests/integration   # also create/delete test objects
 uv run python scripts/seed_lab.py --delete   # remove everything tagged mcp-test
 ```
+
+The seed also uploads `scripts/netbox/mcp_lab.py` as a NetBox script module for the script tests.
+NetBox's API can't delete script modules, so `--delete` leaves it; remove it under
+**Customization → Scripts** if you want it gone.
 
 Project layout:
 

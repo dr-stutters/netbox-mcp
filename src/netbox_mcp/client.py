@@ -177,3 +177,26 @@ class NetBoxClient:
     async def status(self) -> dict[str, Any]:
         result: dict[str, Any] = await self.get("status/")
         return result
+
+    async def get_text(self, path: str, params: dict[str, Any] | None = None) -> tuple[str, str]:
+        """GET a non-JSON response (e.g. a rendered export template). Returns (text, content type)."""
+        try:
+            resp = await self._http.get(path.lstrip("/"), params=params)
+        except httpx.HTTPError as e:
+            raise NetBoxError(f"Could not reach NetBox at {self.base_url}: {e}") from e
+        if resp.is_error:
+            raise _error_from_response(resp)
+        return resp.text, resp.headers.get("content-type", "")
+
+    async def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run a GraphQL query against /graphql/ (outside the REST API's /api/ prefix)."""
+        try:
+            resp = await self._http.post(
+                f"{self.base_url}/graphql/", json={"query": query, "variables": variables or {}}
+            )
+        except httpx.HTTPError as e:
+            raise NetBoxError(f"Could not reach NetBox at {self.base_url}: {e}") from e
+        if resp.is_error:
+            raise _error_from_response(resp)
+        result: dict[str, Any] = resp.json()
+        return result

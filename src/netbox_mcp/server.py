@@ -22,6 +22,7 @@ from netbox_mcp.errors import NetBoxError
 from netbox_mcp.schema import SchemaStore
 from netbox_mcp.tools import (
     analysis,
+    automation,
     cabling,
     config,
     devices,
@@ -52,7 +53,8 @@ cables, IP addresses, prefixes, VLANs, VRFs and virtual machines.
   netbox_config_context, netbox_custom_fields, netbox_circuit_summary, netbox_tunnel_summary,
   netbox_l2vpn_summary, netbox_wireless_lookup, netbox_power_trace, netbox_cluster_summary,
   netbox_service_lookup, netbox_tenant_summary, netbox_contacts_for, netbox_topology,
-  netbox_impact_analysis, netbox_compare.
+  netbox_impact_analysis, netbox_compare, netbox_list_scripts, netbox_job_status,
+  netbox_export, netbox_graphql.
 - netbox_list_objects / netbox_get_object work for any object type ('dcim.devices', 'ipam.prefixes', ...).
 - Not sure of a type, field or filter name? netbox_get_definition and netbox_search_spec describe the API.
 - netbox_api_call reaches any endpoint the other tools don't cover.
@@ -63,7 +65,8 @@ and whether write tools are enabled on this server.
 WRITE_INSTRUCTIONS = """
 Writes are ENABLED: netbox_create_object, netbox_update_object, netbox_delete_object,
 netbox_allocate_ips, netbox_allocate_prefix, netbox_allocate_vlans, netbox_allocate_asns,
-netbox_connect_cable, netbox_add_journal_entry, and non-GET netbox_api_call change live data.
+netbox_connect_cable, netbox_add_journal_entry, netbox_run_script (commit=true), and non-GET
+netbox_api_call change live data.
 Look objects up first, confirm destructive changes with the user, and prefer the allocate tools
 over picking addresses yourself (they are atomic).
 """
@@ -133,6 +136,7 @@ def create_server(settings: Settings, *, auth: AuthProvider | None = None) -> Fa
         config,
         tenancy,
         analysis,
+        automation,
         generic,
         spec,
         writes,

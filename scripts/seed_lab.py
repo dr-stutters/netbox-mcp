@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from pathlib import Path
 from typing import Any
 
 from netbox_mcp.client import NetBoxClient
@@ -26,11 +27,17 @@ from netbox_mcp.config import Settings
 TAG = "mcp-test"
 # Seeded objects that can't carry the mcp-test tag; --delete finds these by name instead.
 UNTAGGED = (
+    "extras/export-templates/",
     "extras/tags/",
     "extras/config-contexts/",
     "extras/custom-fields/",
     "extras/custom-field-choice-sets/",
 )
+
+EXPORT_TEMPLATE = """name,role,site,rack,primary_ip
+{% for d in queryset %}{{ d.name }},{{ d.role }},{{ d.site }},{{ d.rack or '' }},\
+{{ d.primary_ip4.address.ip if d.primary_ip4 else '' }}
+{% endfor %}"""
 
 # Jinja2 template rendered by NetBox; config-context keys (ntp_servers, ...) are top-level variables.
 CONFIG_TEMPLATE = """hostname {{ device.name }}
@@ -69,6 +76,23 @@ class Seeder:
         obj: dict[str, Any] = await self.nb.request("POST", path, json=body)
         print(f"  created {path}{obj['id']}  {obj.get('display')}")
         return obj
+
+    async def upload_scripts(self) -> None:
+        """Upload scripts/netbox/mcp_lab.py as a NetBox script module (updating it if present)."""
+        source = Path(__file__).parent / "netbox" / "mcp_lab.py"
+        files = {"file": ("mcp_lab.py", source.read_bytes(), "text/x-python")}
+        # The API's script `name` is the class name; `fields` avoids serialising script vars.
+        existing, _ = await self.nb.list(
+            "extras/scripts/", {"name": "SiteDeviceCount", "fields": "id,module,name"}, limit=1
+        )
+        # Multipart upload: the JSON client can't send files, so use its HTTP session directly.
+        if existing:
+            resp = await self.nb._http.put(f"extras/scripts/upload/{existing[0]['module']}/", files=files)
+        else:
+            resp = await self.nb._http.post("extras/scripts/upload/", files=files)
+        resp.raise_for_status()
+        if not existing:
+            print("  uploaded script module mcp_lab.py")
 
     async def patch(self, path: str, obj_id: int, data: dict[str, Any]) -> None:
         await self.nb.request("PATCH", f"{path}{obj_id}/", json=data)
@@ -726,6 +750,19 @@ class Seeder:
         )
         await self.patch("dcim/devices/", devs["lab-sw1"]["id"], {"custom_fields": {"mcp_tier": "gold"}})
 
+        # --- Export template and custom scripts (automation hooks) ---
+        await self.ensure(
+            "extras/export-templates/",
+            {"name": "MCP device CSV"},
+            {
+                "object_types": ["dcim.device"],
+                "template_code": EXPORT_TEMPLATE,
+                "mime_type": "text/csv",
+                "file_extension": "csv",
+            },
+        )
+        await self.upload_scripts()
+
         print("Seed complete.")
 
     async def delete(self) -> None:
@@ -735,6 +772,7 @@ class Seeder:
             ("extras/config-contexts/", {"name__isw": "MCP Lab "}),
             ("extras/custom-fields/", {"name__isw": "mcp_"}),
             ("extras/custom-field-choice-sets/", {"name__isw": "MCP "}),
+            ("extras/export-templates/", {"name__isw": "MCP "}),
         ):
             objs, _ = await self.nb.list(path, by_name, limit=100)
             if objs:
@@ -801,6 +839,10 @@ class Seeder:
                 await self.nb.request("DELETE", path, json=[{"id": o["id"]} for o in objs])
                 print(f"  deleted {len(objs)} from {path}")
         print("Delete complete (the mcp-test tag itself is kept).")
+        print(
+            "Note: the uploaded script module 'mcp_lab' can't be deleted via the API; "
+            "remove it under Customization > Scripts if wanted."
+        )
 
 
 async def main() -> None:

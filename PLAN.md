@@ -32,7 +32,7 @@ each one gets its own branch and PR, with unit tests, live integration tests aga
 
 ---
 
-## Phase 2 — new tools (in order)
+## Phase 2 — new tools ✅ complete
 
 ### 2.1 Change history & journal ✅
 
@@ -116,7 +116,7 @@ entry can be added to and read back from a device.
 | `netbox_topology` | cables + traces | Neighbour graph for a device (N hops) or a site, as a Mermaid diagram plus an edge list |
 | `netbox_compare` | any two objects | Field-by-field differences between two devices/interfaces/VLANs, e.g. two switches in a pair |
 
-### 2.10 Automation hooks
+### 2.10 Automation hooks ✅
 
 | Tool | API | Notes |
 |---|---|---|
