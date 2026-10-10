@@ -87,7 +87,7 @@ entry can be added to and read back from a device.
 | `netbox_config_context` | device/VM `config_context` | The merged config context for a device or VM, and which contexts contributed to it |
 | `netbox_custom_fields` | `extras/custom-fields/`, `custom-field-choice-sets/` | Which custom fields exist, what object types they apply to, their types and choices, so the model can filter on them (`cf_<name>`) |
 
-### 2.7 Domain summaries: circuits, VPN, wireless, power
+### 2.7 Domain summaries: circuits, VPN, wireless, power ✅
 
 | Tool | API | Notes |
 |---|---|---|

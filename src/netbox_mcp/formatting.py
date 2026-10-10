@@ -13,6 +13,9 @@ ResponseFormat = Literal["json", "markdown"]
 MAX_RESPONSE_CHARS = 60_000
 
 _DROP_KEYS = {"url", "display_url", "_occupied"}
+# Secrets NetBox stores in plain text (Wi-Fi PSKs, IKE pre-shared keys): masked so they don't end
+# up in model transcripts. netbox_api_call with compact=False still returns raw data.
+_SECRET_KEYS = {"auth_psk", "preshared_key"}
 # Dropped from list results only (still shown by get-object): rarely useful, costly across many rows.
 _LIST_DROP_KEYS = {"created", "last_updated"}
 
@@ -32,6 +35,7 @@ def compact(data: Any, *, top: bool = True, in_list: bool = False) -> Any:
     - choice fields {"value","label"} -> value
     - nested object references -> {"id", "display"} (plus a few identifying keys)
     - top-level `display` when it just repeats another field (name, prefix, address, ...)
+    - secrets (Wi-Fi PSKs, IKE pre-shared keys) -> "********"
     - with in_list=True, also created/last_updated
     """
     if isinstance(data, list):
@@ -50,6 +54,9 @@ def compact(data: Any, *, top: bool = True, in_list: bool = False) -> Any:
     out: dict[str, Any] = {}
     for k, v in data.items():
         if k in _DROP_KEYS or (top and in_list and k in _LIST_DROP_KEYS):
+            continue
+        if k in _SECRET_KEYS and v:
+            out[k] = "********"
             continue
         v = compact(v, top=False)
         if (
