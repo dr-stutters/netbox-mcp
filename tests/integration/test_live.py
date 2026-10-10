@@ -213,3 +213,22 @@ async def test_cluster_services_tenancy(client: Client[Any]) -> None:
         ("MCP NOC", "site MCP Lab"),
         ("Alex Admin", "tenant MCP Corp"),
     }
+
+
+async def test_topology_impact_compare(client: Client[Any]) -> None:
+    topo = await call(client, "netbox_topology", site="MCP Lab")
+    assert {
+        "a": "lab-sw1 GigabitEthernet1/0/3",
+        "b": "lab-sw2 GigabitEthernet1/0/3",
+        "via": "lab-pp1 FP1",
+    } in topo["edges"]
+    assert topo["mermaid"].startswith("graph LR")
+
+    impact = await call(client, "netbox_impact_analysis", device="lab-sw1")
+    assert impact["summary"]["single_homed_neighbours"] == ["lab-ap1"]
+    pdu = await call(client, "netbox_impact_analysis", device="lab-pdu1")
+    assert sorted(pdu["powered_devices"]) == ["lab-rtr1: loses power", "lab-sw1: loses power"]
+
+    diff = await call(client, "netbox_compare", object_type="devices", a="lab-sw1", b="lab-sw2")
+    assert diff["differences"]["rack"] == {"a": "R1", "b": "R2"}
+    assert "GigabitEthernet1/0/5" in diff["interfaces"]["only_on_a"]

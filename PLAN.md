@@ -108,7 +108,7 @@ entry can be added to and read back from a device.
 | `netbox_tenant_summary` | tenants + scoped objects | Everything a tenant owns, by type |
 | `netbox_contacts_for` | `tenancy/contact-assignments/` | Who to contact for a device/site/circuit, by role and priority |
 
-### 2.9 Composite analysis
+### 2.9 Composite analysis ✅
 
 | Tool | API | Notes |
 |---|---|---|
