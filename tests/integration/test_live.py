@@ -97,3 +97,20 @@ async def test_change_history_labels_references(client: Client[Any]) -> None:
         if c["action"] == "update" and "cable" in c.get("changes", {})
     ]
     assert any(str(v).startswith("MCP-") for v in cable_changes)  # cable ids resolved to labels
+
+
+async def test_site_summary(client: Client[Any]) -> None:
+    out = await call(client, "netbox_site_summary", site="MCP Lab")
+    assert out["counts"]["devices"] >= 5
+    assert {r["rack"] for r in out["racks"]} >= {"R1", "R2"}
+    assert "10 USERS" in out["vlans"]
+
+
+async def test_rack_elevation_and_space(client: Client[Any]) -> None:
+    r2 = await call(client, "netbox_rack_elevation", rack="R2", site="mcp-lab")
+    assert {"device": "lab-sw2", "units": "U38", "face": "both"} in r2["devices"]
+    assert r2["reservations"] == [{"units": "U20-U21", "description": "Reserved for lab firewall"}]
+
+    space = await call(client, "netbox_find_rack_space", units=19, site="mcp-lab")
+    by_rack = {r["rack"]: r for r in space["results"]}
+    assert by_rack["R2"]["fits_at_position"] == [1]  # the reservation at U20-21 blocks anything higher
