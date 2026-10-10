@@ -5,7 +5,7 @@ Everything created is tagged `mcp-test`. Safe to re-run: existing objects are re
     uv run python scripts/seed_lab.py            # create / update
     uv run python scripts/seed_lab.py --delete   # remove everything tagged mcp-test
 
-Topology (site "MCP Lab", VRF "LAB"):
+Topology (site "MCP Lab", location "DC1" with racks R1/R2, VRF "LAB"):
 
     lab-rtr1 Gi2 ──────────── Gi1/0/1 lab-sw1 Gi1/0/3 ── FP1 lab-pp1 RP1 ══ RP1 lab-pp2 FP1 ── Gi1/0/3 lab-sw2
     lab-rtr1 Gi3 ──────────────────────────────────────────────────────────────────────────── Gi1/0/1 lab-sw2
@@ -102,6 +102,43 @@ class Seeder:
             devs[spec["name"]] = await self.ensure(
                 "dcim/devices/", {"name": spec["name"], "site_id": site["id"]}, spec["data"]
             )
+
+        # --- Location, racks and rack positions ---
+        loc = await self.ensure(
+            "dcim/locations/",
+            {"slug": "mcp-lab-dc1", "site_id": site["id"]},
+            {"name": "DC1", "site": site["id"]},
+        )
+        racks = {}
+        for rack_name in ("R1", "R2"):
+            racks[rack_name] = await self.ensure(
+                "dcim/racks/",
+                {"name": rack_name, "site_id": site["id"]},
+                {"site": site["id"], "location": loc["id"], "status": "active", "u_height": 42},
+            )
+        for dev_name, rack_name, position in [
+            ("lab-pp1", "R1", 42),
+            ("lab-rtr1", "R1", 40),
+            ("lab-sw1", "R1", 38),
+            ("lab-pp2", "R2", 42),
+            ("lab-sw2", "R2", 38),
+        ]:
+            await self.patch(
+                "dcim/devices/",
+                devs[dev_name]["id"],
+                {
+                    "location": loc["id"],
+                    "rack": racks[rack_name]["id"],
+                    "position": position,
+                    "face": "front",
+                },
+            )
+        me = await self.nb.get("authentication-check/")
+        await self.ensure(
+            "dcim/rack-reservations/",
+            {"rack_id": racks["R2"]["id"], "description": "Reserved for lab firewall"},
+            {"rack": racks["R2"]["id"], "units": [20, 21], "user": me["id"], "status": "active"},
+        )
 
         # --- IPAM scaffolding ---
         vrf = await self.ensure("ipam/vrfs/", {"name": "LAB"}, {"rd": "65000:99"})
@@ -273,6 +310,9 @@ class Seeder:
             "dcim/rear-ports/",
             "dcim/interfaces/",
             "dcim/devices/",
+            "dcim/rack-reservations/",
+            "dcim/racks/",
+            "dcim/locations/",
             "ipam/prefixes/",
             "ipam/vlans/",
             "ipam/vlan-groups/",

@@ -21,6 +21,8 @@ def test_indexes_model_list_endpoints_only() -> None:
         "virtualization.virtual-machines",
         "ipam.prefixes",
         "dcim.sites",
+        "dcim.locations",
+        "dcim.racks",
         "core.object-changes",
         "extras.journal-entries",
     }

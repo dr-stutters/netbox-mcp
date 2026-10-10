@@ -80,6 +80,8 @@ MINI_SPEC: dict[str, Any] = {
         ),
         "/api/ipam/prefixes/": _list_endpoint("Prefix", "prefix", ["prefix", "vrf_id"], None),
         "/api/dcim/sites/": _list_endpoint("Site", "site", ["name", "slug"], None),
+        "/api/dcim/locations/": _list_endpoint("Location", "location", ["name", "slug", "site_id"], None),
+        "/api/dcim/racks/": _list_endpoint("Rack", "rack", ["name", "site_id", "location_id"], None),
         "/api/core/object-changes/": _list_endpoint(
             "ObjectChange",
             "object change",
@@ -131,6 +133,8 @@ MINI_SPEC: dict[str, Any] = {
             "VirtualMachine": {"type": "object", "properties": {}},
             "Prefix": {"type": "object", "properties": {}},
             "Site": {"type": "object", "properties": {"id": {"type": "integer"}}},
+            "Location": {"type": "object", "properties": {}},
+            "Rack": {"type": "object", "properties": {}},
             "ObjectChange": {"type": "object", "properties": {}},
             "JournalEntry": {"type": "object", "properties": {}},
             "WritableJournalEntryRequest": {

@@ -34,7 +34,7 @@ each one gets its own branch and PR, with unit tests, live integration tests aga
 
 ## Phase 2 — new tools (in order)
 
-### 2.1 Change history & journal
+### 2.1 Change history & journal ✅
 
 Who changed what and when, plus the ability to leave notes on objects.
 
@@ -47,7 +47,7 @@ Who changed what and when, plus the ability to leave notes on objects.
 **Done when:** "what changed on lab-sw1 in the last day?" returns field-level diffs, and a journal
 entry can be added to and read back from a device.
 
-### 2.2 Site summary & rack space
+### 2.2 Site summary & rack space ✅
 
 | Tool | API | Notes |
 |---|---|---|
