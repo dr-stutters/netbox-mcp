@@ -165,3 +165,49 @@ async def test_allocations_and_connect_cable(client: Client[Any]) -> None:
         await call(client, "netbox_delete_object", object_type="ip-addresses", ids=[ip["allocated"][0]["id"]])
         await call(client, "netbox_delete_object", object_type="vlans", ids=[vlan["allocated"][0]["id"]])
         await call(client, "netbox_delete_object", object_type="asns", ids=[asn["allocated"][0]["id"]])
+
+
+async def test_run_script_dry_run_then_commit(client: Client[Any]) -> None:
+    sw2 = (
+        await call(
+            client,
+            "netbox_list_objects",
+            object_type="devices",
+            filters={"name": "lab-sw2"},
+            fields=["id", "description"],
+        )
+    )["results"][0]
+    original = sw2.get("description", "")
+    dry = await call(
+        client,
+        "netbox_run_script",
+        script="SetDescription",
+        data={"device": sw2["id"], "new_description": "it-dry"},
+    )
+    assert dry["status"] == "completed" and dry["commit"] is False
+    after_dry = await call(
+        client, "netbox_get_object", object_type="devices", id=sw2["id"], fields=["description"]
+    )
+    assert after_dry.get("description", "") == original  # rolled back
+
+    try:
+        done = await call(
+            client,
+            "netbox_run_script",
+            script="SetDescription",
+            data={"device": sw2["id"], "new_description": "it-commit"},
+            commit=True,
+        )
+        assert done["status"] == "completed"
+        after = await call(
+            client, "netbox_get_object", object_type="devices", id=sw2["id"], fields=["description"]
+        )
+        assert after["description"] == "it-commit"
+    finally:
+        await call(
+            client,
+            "netbox_update_object",
+            object_type="devices",
+            id=sw2["id"],
+            data={"description": original},
+        )

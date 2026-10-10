@@ -232,3 +232,23 @@ async def test_topology_impact_compare(client: Client[Any]) -> None:
     diff = await call(client, "netbox_compare", object_type="devices", a="lab-sw1", b="lab-sw2")
     assert diff["differences"]["rack"] == {"a": "R1", "b": "R2"}
     assert "GigabitEthernet1/0/5" in diff["interfaces"]["only_on_a"]
+
+
+async def test_scripts_export_graphql(client: Client[Any]) -> None:
+    scripts = await call(client, "netbox_list_scripts")
+    assert {"SetDescription", "SiteDeviceCount"} <= {s["name"] for s in scripts["scripts"]}
+
+    export = await call(
+        client, "netbox_export", object_type="devices", template="MCP device CSV", filters={"role": "switch"}
+    )
+    assert export["content"].splitlines()[1:] == [
+        "lab-sw1,Switch,MCP Lab,R1,10.99.99.11",
+        "lab-sw2,Switch,MCP Lab,R2,10.99.99.12",
+    ]
+
+    gql = await call(
+        client,
+        "netbox_graphql",
+        query='{ device_list(filters: {name: {exact: "lab-sw1"}}) { name rack { name } } }',
+    )
+    assert gql["data"]["device_list"] == [{"name": "lab-sw1", "rack": {"name": "R1"}}]
