@@ -5,7 +5,8 @@ An [MCP](https://modelcontextprotocol.io) server that lets Claude, or any MCP cl
 language and the model uses NetBox's API for you:
 
 > *"Where is 10.99.99.11?"* · *"Summarise lab-sw1"* · *"Trace the cable from lab-sw1 Gi1/0/3"* ·
-> *"What's on VLAN 10?"* · *"Give me the next free /24 in 10.99.0.0/16 and reserve it for the lab"*
+> *"What's on VLAN 10?"* · *"What changed on lab-sw1 this week?"* ·
+> *"Give me the next free /24 in 10.99.0.0/16 and reserve it for the lab"*
 
 Built with [FastMCP](https://gofastmcp.com) for **NetBox 4.x** (tested on 4.7).
 
@@ -220,6 +221,8 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `netbox_next_available_ips` | Preview the next free IPs in a prefix |
 | `netbox_next_available_prefixes` | Preview free blocks, or the next N child prefixes of a given size |
 | `netbox_vlan_lookup` | VLAN by ID or name, with its prefixes and the tagged and untagged interfaces carrying it |
+| `netbox_change_history` | Who changed what and when: filter by object (including its interfaces), user, action and time (`since="7d"`). Updates show only the fields that changed, with references shown by name |
+| `netbox_journal` | Journal notes on an object, or the latest notes across NetBox |
 
 ### Any object type
 
@@ -241,6 +244,7 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `netbox_delete_object` | Delete by ID. If any ID is missing, nothing is deleted |
 | `netbox_allocate_ips` | Reserve the next free IP(s) atomically. Optionally assign to an interface and set as primary |
 | `netbox_allocate_prefix` | Carve the next free child prefix(es) atomically |
+| `netbox_add_journal_entry` | Add a dated note to any object, e.g. "replaced PSU" (info / success / warning / danger) |
 
 ## Security notes
 

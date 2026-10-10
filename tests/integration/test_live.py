@@ -86,3 +86,14 @@ async def test_generic_list_with_filters(client: Client[Any]) -> None:
         client, "netbox_list_objects", object_type="devices", filters={"site": "mcp-lab", "role": "switch"}
     )
     assert {r["name"] for r in out["results"]} == {"lab-sw1", "lab-sw2"}
+
+
+async def test_change_history_labels_references(client: Client[Any]) -> None:
+    out = await call(client, "netbox_change_history", object_type="devices", object="lab-sw1", limit=50)
+    assert out["changes"], "seeded lab should have changelog entries"
+    cable_changes = [
+        c["changes"]["cable"]["to"]
+        for c in out["changes"]
+        if c["action"] == "update" and "cable" in c.get("changes", {})
+    ]
+    assert any(str(v).startswith("MCP-") for v in cable_changes)  # cable ids resolved to labels

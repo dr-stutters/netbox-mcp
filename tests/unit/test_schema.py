@@ -20,6 +20,9 @@ def test_indexes_model_list_endpoints_only() -> None:
         "virtualization.interfaces",
         "virtualization.virtual-machines",
         "ipam.prefixes",
+        "dcim.sites",
+        "core.object-changes",
+        "extras.journal-entries",
     }
     dev = INDEX.types["dcim.devices"]
     assert (dev.model, dev.writable, dev.path) == ("Device", "WritableDeviceRequest", "dcim/devices/")

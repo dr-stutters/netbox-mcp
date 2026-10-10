@@ -20,7 +20,7 @@ from netbox_mcp.config import Settings
 from netbox_mcp.deps import current_caller
 from netbox_mcp.errors import NetBoxError
 from netbox_mcp.schema import SchemaStore
-from netbox_mcp.tools import cabling, devices, generic, ipam, search, spec, system, writes
+from netbox_mcp.tools import cabling, devices, generic, history, ipam, search, spec, system, writes
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ Tools for NetBox, the network source of truth (DCIM + IPAM): sites, racks, devic
 cables, IP addresses, prefixes, VLANs, VRFs and virtual machines.
 - Start with the task tools: netbox_search, netbox_lookup_ip, netbox_lookup_mac, netbox_device_summary,
   netbox_interface_detail, netbox_trace_cable, netbox_prefix_utilization, netbox_next_available_ips,
-  netbox_next_available_prefixes, netbox_vlan_lookup.
+  netbox_next_available_prefixes, netbox_vlan_lookup, netbox_change_history, netbox_journal.
 - netbox_list_objects / netbox_get_object work for any object type ('dcim.devices', 'ipam.prefixes', ...).
 - Not sure of a type, field or filter name? netbox_get_definition and netbox_search_spec describe the API.
 - netbox_api_call reaches any endpoint the other tools don't cover.
@@ -39,7 +39,8 @@ and whether write tools are enabled on this server.
 
 WRITE_INSTRUCTIONS = """
 Writes are ENABLED: netbox_create_object, netbox_update_object, netbox_delete_object,
-netbox_allocate_ips, netbox_allocate_prefix, and non-GET netbox_api_call change live data.
+netbox_allocate_ips, netbox_allocate_prefix, netbox_add_journal_entry, and non-GET netbox_api_call
+change live data.
 Look objects up first, confirm destructive changes with the user, and prefer the allocate tools
 over picking addresses yourself (they are atomic).
 """
@@ -96,6 +97,6 @@ def create_server(settings: Settings, *, auth: AuthProvider | None = None) -> Fa
         """Liveness check for Docker/load balancers. Unauthenticated, so it reveals nothing about NetBox."""
         return JSONResponse({"status": "ok"})
 
-    for module in (system, search, devices, cabling, ipam, generic, spec, writes):
+    for module in (system, search, devices, cabling, ipam, history, generic, spec, writes):
         module.register(mcp, settings)
     return mcp

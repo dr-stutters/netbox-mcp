@@ -79,6 +79,25 @@ MINI_SPEC: dict[str, Any] = {
             "VirtualMachine", "virtual machine", ["status"], None
         ),
         "/api/ipam/prefixes/": _list_endpoint("Prefix", "prefix", ["prefix", "vrf_id"], None),
+        "/api/dcim/sites/": _list_endpoint("Site", "site", ["name", "slug"], None),
+        "/api/core/object-changes/": _list_endpoint(
+            "ObjectChange",
+            "object change",
+            [
+                "changed_object_type",
+                "changed_object_id",
+                "related_object_type",
+                "related_object_id",
+                "user_name",
+            ],
+            None,
+        ),
+        "/api/extras/journal-entries/": _list_endpoint(
+            "JournalEntry",
+            "journal entry",
+            ["assigned_object_type", "assigned_object_id", "kind"],
+            "WritableJournalEntryRequest",
+        ),
     },
     "components": {
         "schemas": {
@@ -111,6 +130,18 @@ MINI_SPEC: dict[str, Any] = {
             "VMInterface": {"type": "object", "properties": {}},
             "VirtualMachine": {"type": "object", "properties": {}},
             "Prefix": {"type": "object", "properties": {}},
+            "Site": {"type": "object", "properties": {"id": {"type": "integer"}}},
+            "ObjectChange": {"type": "object", "properties": {}},
+            "JournalEntry": {"type": "object", "properties": {}},
+            "WritableJournalEntryRequest": {
+                "type": "object",
+                "properties": {
+                    "assigned_object_type": {"type": "string"},
+                    "assigned_object_id": {"type": "integer"},
+                    "kind": {"enum": ["info", "warning"], "type": "string"},
+                    "comments": {"type": "string"},
+                },
+            },
         }
     },
 }

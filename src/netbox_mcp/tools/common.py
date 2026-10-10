@@ -8,14 +8,17 @@ from typing import Any, Literal
 
 from netbox_mcp.client import NetBoxClient
 from netbox_mcp.errors import InvalidRequest
+from netbox_mcp.schema import ObjectType
 
 HostKind = Literal["device", "vm"]
 
 
-def label(obj: dict[str, Any] | None) -> str | None:
-    """Short human label for a (possibly nested) NetBox object."""
-    if not obj:
+def label(obj: dict[str, Any] | int | str | None) -> str | None:
+    """Short human label for a (possibly nested) NetBox object. Bare ids/strings pass through."""
+    if obj is None or obj == "":
         return None
+    if not isinstance(obj, dict):
+        return str(obj)
     return str(
         obj.get("display") or obj.get("name") or obj.get("address") or obj.get("prefix") or obj.get("id")
     )
@@ -143,3 +146,32 @@ def parse_ip(value: str) -> ipaddress.IPv4Interface | ipaddress.IPv6Interface:
         return ipaddress.ip_interface(value.strip())
     except ValueError as e:
         raise InvalidRequest(f"{value!r} is not a valid IP address.") from e
+
+
+# Filters tried, in order, to find an object by a human reference (whichever the type supports).
+_NATURAL_KEYS = ("name", "address", "prefix", "label", "cid", "slug", "model", "vid")
+
+
+def content_type(otype: ObjectType) -> str:
+    """NetBox content-type label for an object type, e.g. dcim.devices -> 'dcim.device',
+    ipam.ip-addresses -> 'ipam.ipaddress' (as used by changelog, journal and generic relations)."""
+    app = otype.key.split(".", 1)[0]
+    model = (otype.model or otype.key.split(".", 1)[1].rstrip("s")).replace("-", "")
+    return f"{app}.{model.lower()}"
+
+
+async def resolve_object(nb: NetBoxClient, otype: ObjectType, ref: str | int) -> dict[str, Any]:
+    """Find one object of any type by id, or by its natural key (name, address, prefix, label, ...)."""
+    if isinstance(ref, int) or str(ref).isdigit():
+        return await nb.get_object(f"{otype.path}{int(ref)}/")
+    available = otype.filter_names()
+    for key in _NATURAL_KEYS:
+        if key not in available:
+            continue
+        objs, count = await nb.list(otype.path, {key: ref}, limit=10)
+        if count == 1:
+            return objs[0]
+        if count > 1:
+            options = "; ".join(f"id={o['id']} ({label(o)})" for o in objs)
+            raise InvalidRequest(f"{otype.key} {ref!r} is ambiguous: {options}. Pass the id instead.")
+    raise InvalidRequest(f"No {otype.key} matching {ref!r}. Try netbox_search, or pass the id.")
