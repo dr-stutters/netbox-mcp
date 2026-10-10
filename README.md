@@ -231,6 +231,11 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `netbox_render_config` | A device's or VM's intended config, rendered from its config template with its config context |
 | `netbox_config_context` | A device's or VM's merged config context, and which contexts contributed (in merge order, with what they matched on) |
 | `netbox_custom_fields` | Which custom fields exist, their types, choices and object types, and how to filter on them |
+| `netbox_circuit_summary` | A circuit end to end: provider, type, commit rate, and each side's termination, cross-connect and the device/interface cabled to it |
+| `netbox_tunnel_summary` | A VPN tunnel's endpoints (interface, role, outside IP) and IPsec profile with IKE/IPsec proposals; or list all tunnels |
+| `netbox_l2vpn_summary` | An L2VPN (by name, slug or identifier/VNI) with its VLAN, interface and VM-interface members; or list all |
+| `netbox_wireless_lookup` | SSIDs with VLAN, security type and the APs serving them |
+| `netbox_power_trace` | A device's power chain: PSU → PDU outlet → PDU inlet → feed → panel, plus the rack's power budget |
 | `netbox_change_history` | Who changed what and when: filter by object (including its interfaces), user, action and time (`since="7d"`). Updates show only the fields that changed, with references shown by name |
 | `netbox_journal` | Journal notes on an object, or the latest notes across NetBox |
 
@@ -270,6 +275,9 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
   account's name.
 - **Shared credential.** Everyone uses the same NetBox service account. If you need per-user NetBox
   permissions, run separate instances with different NetBox tokens.
+- **Secrets are masked.** NetBox stores Wi-Fi PSKs (`auth_psk`) and IKE pre-shared keys
+  (`preshared_key`) in plain text. Tool output shows `********` instead, and the summaries only report
+  whether one is set. `netbox_api_call` with `compact=false` returns raw data.
 - **The container is locked down:** non-root user, read-only filesystem, no Linux capabilities, and
   no `.env` baked into the image.
 - **Use HTTPS beyond a trusted network**, both for the MCP endpoint (via Caddy) and, ideally, for

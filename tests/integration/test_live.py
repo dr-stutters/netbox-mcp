@@ -168,3 +168,30 @@ async def test_custom_fields_and_cf_filters(client: Client[Any]) -> None:
     assert tier["choices"] == ["gold", "silver"]
     out = await call(client, "netbox_list_objects", object_type="devices", filters={"cf_mcp_tier": "gold"})
     assert [r["name"] for r in out["results"]] == ["lab-sw1"]
+
+
+async def test_domain_summaries(client: Client[Any]) -> None:
+    circuit = await call(client, "netbox_circuit_summary", circuit="MCP-CID-001")
+    assert circuit["sides"]["A"]["connected_to"] == "lab-rtr1 GigabitEthernet4 (interface)"
+
+    tunnel = await call(client, "netbox_tunnel_summary", tunnel="MCP-TUN-1")
+    assert {e["interface"] for e in tunnel["endpoints"]} == {"lab-rtr1 Tunnel1", "lab-sw2 Tunnel1"}
+    assert tunnel["ipsec"]["ike_policy"]["proposals"][0]["encryption"] == "aes-256-cbc"
+
+    l2vpn = await call(client, "netbox_l2vpn_summary", l2vpn="10020")
+    assert l2vpn["vlans"] == ["SERVERS (20)"]
+
+    wlan = await call(client, "netbox_wireless_lookup", ssid="MCP-Guest")
+    assert wlan["wireless_lans"][0]["psk_set"] is True
+    raw = await call(
+        client, "netbox_list_objects", object_type="wireless-lans", filters={"ssid": "MCP-Guest"}
+    )
+    assert raw["results"][0]["auth_psk"] == "********"  # secrets masked in generic output too
+
+
+async def test_power_trace(client: Client[Any]) -> None:
+    out = await call(client, "netbox_power_trace", device="lab-sw1")
+    chain = out["power_ports"][0]["chain"]
+    assert chain[1] == "lab-pdu1 Outlet1 (outlet, leg A)"
+    assert chain[-1] == "MCP Panel A (panel)"
+    assert out["rack_budget"]["capacity_w"] == 2944

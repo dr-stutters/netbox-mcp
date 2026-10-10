@@ -99,6 +99,8 @@ class Seeder:
             ("router", "Router", "2196f3"),
             ("switch", "Switch", "4caf50"),
             ("patch-panel", "Patch Panel", "9e9e9e"),
+            ("access-point", "Access Point", "00bcd4"),
+            ("pdu", "PDU", "f44336"),
         ]:
             roles[slug] = await self.ensure(
                 "dcim/device-roles/", {"slug": slug}, {"name": name, "color": color}
@@ -381,6 +383,197 @@ class Seeder:
             )
             await self.patch("dcim/interfaces/", iface_obj["id"], {"primary_mac_address": m["id"]})
 
+        # --- VPN: an IPsec tunnel between lab-rtr1 and lab-sw2 over the 10.99.255.0/31 link ---
+        ike_prop = await self.ensure(
+            "vpn/ike-proposals/",
+            {"name": "MCP IKE AES256"},
+            {
+                "authentication_method": "preshared-keys",
+                "encryption_algorithm": "aes-256-cbc",
+                "authentication_algorithm": "hmac-sha256",
+                "group": 14,
+            },
+        )
+        ike_pol = await self.ensure(
+            "vpn/ike-policies/", {"name": "MCP IKEv2"}, {"version": 2, "proposals": [ike_prop["id"]]}
+        )
+        esp_prop = await self.ensure(
+            "vpn/ipsec-proposals/", {"name": "MCP ESP AES256-GCM"}, {"encryption_algorithm": "aes-256-gcm"}
+        )
+        esp_pol = await self.ensure(
+            "vpn/ipsec-policies/", {"name": "MCP IPsec"}, {"proposals": [esp_prop["id"]], "pfs_group": 14}
+        )
+        profile = await self.ensure(
+            "vpn/ipsec-profiles/",
+            {"name": "MCP Site-to-Site"},
+            {"mode": "esp", "ike_policy": ike_pol["id"], "ipsec_policy": esp_pol["id"]},
+        )
+        tunnel = await self.ensure(
+            "vpn/tunnels/",
+            {"name": "MCP-TUN-1"},
+            {
+                "status": "active",
+                "encapsulation": "ipsec-tunnel",
+                "ipsec_profile": profile["id"],
+                "tunnel_id": 100,
+            },
+        )
+        p2p_sw2 = await ip("10.99.255.1/31", sw["lab-sw2"]["Gi1/0/1"])
+        p2p_rtr, _ = await self.nb.list(
+            "ipam/ip-addresses/", {"address": "10.99.255.0/31", "vrf_id": vrf["id"]}, limit=1
+        )
+        for dev_name, outside in (("lab-rtr1", p2p_rtr[0]), ("lab-sw2", p2p_sw2)):
+            tun_if = await iface(dev_name, "Tunnel1", "virtual", description="MCP-TUN-1")
+            await self.ensure(
+                "vpn/tunnel-terminations/",
+                {"tunnel_id": tunnel["id"], "termination_id": tun_if["id"]},
+                {
+                    "tunnel": tunnel["id"],
+                    "role": "peer",
+                    "termination_type": IF,
+                    "termination_id": tun_if["id"],
+                    "outside_ip": outside["id"],
+                },
+            )
+
+        # --- L2VPN: VXLAN-EVPN stretching VLAN 20 ---
+        l2vpn = await self.ensure(
+            "vpn/l2vpns/",
+            {"slug": "mcp-evpn-servers"},
+            {"name": "MCP-EVPN-SERVERS", "type": "vxlan-evpn", "identifier": 10020},
+        )
+        await self.ensure(
+            "vpn/l2vpn-terminations/",
+            {"l2vpn_id": l2vpn["id"], "vlan_id": vlans[20]["id"]},
+            {
+                "l2vpn": l2vpn["id"],
+                "assigned_object_type": "ipam.vlan",
+                "assigned_object_id": vlans[20]["id"],
+            },
+        )
+
+        # --- Wireless: an AP on lab-sw1 Gi1/0/5 serving two SSIDs ---
+        dt_ap = await self.ensure(
+            "dcim/device-types/", {"slug": "ap-6"}, {"model": "AP-6", "manufacturer": generic["id"]}
+        )
+        ap = await self.ensure(
+            "dcim/devices/",
+            {"name": "lab-ap1", "site_id": site["id"]},
+            {
+                "device_type": dt_ap["id"],
+                "role": roles["access-point"]["id"],
+                "site": site["id"],
+                "status": "active",
+            },
+        )
+        devs["lab-ap1"] = ap
+        wgroup = await self.ensure(
+            "wireless/wireless-lan-groups/", {"slug": "mcp-wireless"}, {"name": "MCP Wireless"}
+        )
+        corp = await self.ensure(
+            "wireless/wireless-lans/",
+            {"ssid": "MCP-Corp"},
+            {
+                "group": wgroup["id"],
+                "status": "active",
+                "vlan": vlans[10]["id"],
+                "auth_type": "wpa-enterprise",
+                "auth_cipher": "aes",
+            },
+        )
+        guest = await self.ensure(
+            "wireless/wireless-lans/",
+            {"ssid": "MCP-Guest"},
+            {
+                "group": wgroup["id"],
+                "status": "active",
+                "auth_type": "wpa-personal",
+                "auth_cipher": "aes",
+                "auth_psk": "mcp-lab-guest-psk",
+            },
+        )
+        await self.patch("wireless/wireless-lans/", guest["id"], {"auth_psk": "mcp-lab-guest-psk"})
+        await iface("lab-ap1", "wlan0", "ieee802.11ax", rf_role="ap", wireless_lans=[corp["id"], guest["id"]])
+        ap_eth = await iface("lab-ap1", "eth0", "1000base-t", description="uplink")
+        sw1_gi5 = await iface(
+            "lab-sw1",
+            "GigabitEthernet1/0/5",
+            "1000base-t",
+            mode="access",
+            untagged_vlan=vlans[10]["id"],
+            description="lab-ap1",
+        )
+        await cable((IF, sw1_gi5["id"]), (IF, ap_eth["id"]), "MCP-008")
+
+        # --- Power: panel -> feed (rack R1) -> lab-pdu1 -> lab-sw1 / lab-rtr1 PSUs ---
+        panel = await self.ensure(
+            "dcim/power-panels/",
+            {"name": "MCP Panel A", "site_id": site["id"]},
+            {"site": site["id"], "location": loc["id"]},
+        )
+        feed = await self.ensure(
+            "dcim/power-feeds/",
+            {"name": "MCP Feed A1", "power_panel_id": panel["id"]},
+            {
+                "power_panel": panel["id"],
+                "rack": racks["R1"]["id"],
+                "status": "active",
+                "supply": "ac",
+                "phase": "single-phase",
+                "voltage": 230,
+                "amperage": 16,
+                "max_utilization": 80,
+            },
+        )
+        dt_pdu = await self.ensure(
+            "dcim/device-types/", {"slug": "pdu-8"}, {"model": "PDU-8", "manufacturer": generic["id"]}
+        )
+        pdu = await self.ensure(
+            "dcim/devices/",
+            {"name": "lab-pdu1", "site_id": site["id"]},
+            {"device_type": dt_pdu["id"], "role": roles["pdu"]["id"], "site": site["id"], "status": "active"},
+        )
+        await self.patch(
+            "dcim/devices/",
+            pdu["id"],
+            {"location": loc["id"], "rack": racks["R1"]["id"], "position": 1, "face": "front"},
+        )
+
+        async def component(path: str, device: dict[str, Any], name: str, **data: Any) -> dict[str, Any]:
+            return await self.ensure(
+                path, {"device_id": device["id"], "name": name}, {"device": device["id"], **data}
+            )
+
+        pdu_in = await component("dcim/power-ports/", pdu, "PSU-IN", type="iec-60320-c20", maximum_draw=3680)
+        outlets = [
+            await component(
+                "dcim/power-outlets/",
+                pdu,
+                f"Outlet{n}",
+                type="iec-60320-c13",
+                power_port=pdu_in["id"],
+                feed_leg="A",
+            )
+            for n in (1, 2)
+        ]
+        PP, PO, PF = "dcim.powerport", "dcim.poweroutlet", "dcim.powerfeed"
+        await cable((PF, feed["id"]), (PP, pdu_in["id"]), "MCP-PWR-001")
+        for (dev_name, max_w, alloc_w), outlet, lbl in zip(
+            (("lab-sw1", 350, 120), ("lab-rtr1", 250, 90)),
+            outlets,
+            ("MCP-PWR-002", "MCP-PWR-003"),
+            strict=True,
+        ):
+            psu = await component(
+                "dcim/power-ports/",
+                devs[dev_name],
+                "PSU1",
+                type="iec-60320-c14",
+                maximum_draw=max_w,
+                allocated_draw=alloc_w,
+            )
+            await cable((PP, psu["id"]), (PO, outlet["id"]), lbl)
+
         # --- Config template (via the IOS-XE platform) and config contexts ---
         template = await self.ensure(
             "extras/config-templates/", {"name": "MCP IOS-XE base"}, {"template_code": CONFIG_TEMPLATE}
@@ -444,12 +637,25 @@ class Seeder:
                 print(f"  deleted {len(objs)} from {path}")
         order = [
             "dcim/cables/",
+            "vpn/tunnel-terminations/",
+            "vpn/tunnels/",
+            "vpn/ipsec-profiles/",
+            "vpn/ipsec-policies/",
+            "vpn/ipsec-proposals/",
+            "vpn/ike-policies/",
+            "vpn/ike-proposals/",
+            "vpn/l2vpn-terminations/",
+            "vpn/l2vpns/",
+            "wireless/wireless-lans/",
+            "wireless/wireless-lan-groups/",
             "dcim/mac-addresses/",
             "ipam/ip-addresses/",
             "dcim/front-ports/",
             "dcim/rear-ports/",
             "dcim/interfaces/",
             "dcim/devices/",
+            "dcim/power-feeds/",
+            "dcim/power-panels/",
             "circuits/circuit-terminations/",
             "circuits/circuits/",
             "circuits/provider-networks/",
