@@ -80,3 +80,18 @@ async def test_allocate_and_release_ip(client: Client[Any]) -> None:
         assert ip["address"] == before["available"][0]
     finally:
         await call(client, "netbox_delete_object", object_type="ip-addresses", ids=[ip["id"]])
+
+
+async def test_journal_round_trip(client: Client[Any]) -> None:
+    added = await call(
+        client,
+        "netbox_add_journal_entry",
+        object_type="devices",
+        object="lab-sw1",
+        comments="integration test",
+    )
+    try:
+        out = await call(client, "netbox_journal", object_type="devices", object="lab-sw1")
+        assert any(e["id"] == added["id"] and e["comments"] == "integration test" for e in out["entries"])
+    finally:
+        await call(client, "netbox_api_call", path=f"extras/journal-entries/{added['id']}/", method="DELETE")
