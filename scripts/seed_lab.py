@@ -101,6 +101,7 @@ class Seeder:
             ("patch-panel", "Patch Panel", "9e9e9e"),
             ("access-point", "Access Point", "00bcd4"),
             ("pdu", "PDU", "f44336"),
+            ("hypervisor", "Hypervisor", "673ab7"),
         ]:
             roles[slug] = await self.ensure(
                 "dcim/device-roles/", {"slug": slug}, {"name": name, "color": color}
@@ -574,6 +575,110 @@ class Seeder:
             )
             await cable((PP, psu["id"]), (PO, outlet["id"]), lbl)
 
+        # --- Virtualization: a cluster with one host and two VMs ---
+        ctype_hv = await self.ensure(
+            "virtualization/cluster-types/", {"slug": "mcp-hypervisor"}, {"name": "MCP Hypervisor"}
+        )
+        cluster = await self.ensure(
+            "virtualization/clusters/",
+            {"name": "mcp-lab-cluster"},
+            {"type": ctype_hv["id"], "status": "active", "scope_type": "dcim.site", "scope_id": site["id"]},
+        )
+        dt_srv = await self.ensure(
+            "dcim/device-types/", {"slug": "server-2u"}, {"model": "Server 2U", "manufacturer": generic["id"]}
+        )
+        hv = await self.ensure(
+            "dcim/devices/",
+            {"name": "lab-hv1", "site_id": site["id"]},
+            {
+                "device_type": dt_srv["id"],
+                "role": roles["hypervisor"]["id"],
+                "site": site["id"],
+                "status": "active",
+            },
+        )
+        await self.patch("dcim/devices/", hv["id"], {"cluster": cluster["id"]})
+        vms = {}
+        for vm_name, status, vcpus, memory, disk_gb in (
+            ("mcp-vm1", "active", 2, 4096, 40),
+            ("mcp-vm2", "planned", 4, 8192, 80),
+        ):
+            vms[vm_name] = await self.ensure(
+                "virtualization/virtual-machines/",
+                {"name": vm_name, "cluster_id": cluster["id"]},
+                {
+                    "cluster": cluster["id"],
+                    "device": hv["id"],
+                    "status": status,
+                    "vcpus": vcpus,
+                    "memory": memory,
+                },
+            )
+            await self.ensure(
+                "virtualization/virtual-disks/",
+                {"virtual_machine_id": vms[vm_name]["id"], "name": "disk0"},
+                {"virtual_machine": vms[vm_name]["id"], "size": disk_gb * 1000},
+            )
+
+        # --- Services ---
+        rtr_mgmt, _ = await self.nb.list(
+            "ipam/ip-addresses/", {"address": "10.99.99.1/24", "vrf_id": vrf["id"]}, limit=1
+        )
+        for parent_type, parent, svc_name, protocol, port, ips in (
+            ("dcim.device", devs["lab-rtr1"], "SSH", "tcp", 22, [rtr_mgmt[0]["id"]]),
+            ("dcim.device", devs["lab-sw1"], "SNMP", "udp", 161, []),
+            ("virtualization.virtualmachine", vms["mcp-vm1"], "HTTPS", "tcp", 443, []),
+        ):
+            await self.ensure(
+                "ipam/services/",
+                {"name": svc_name, "parent_object_type": parent_type, "parent_object_id": parent["id"]},
+                {"protocol": protocol, "ports": [port], "ipaddresses": ips},
+            )
+
+        # --- Tenancy and contacts ---
+        tgroup = await self.ensure(
+            "tenancy/tenant-groups/", {"slug": "mcp-customers"}, {"name": "MCP Customers"}
+        )
+        tenant = await self.ensure(
+            "tenancy/tenants/", {"slug": "mcp-corp"}, {"name": "MCP Corp", "group": tgroup["id"]}
+        )
+        users_prefix, _ = await self.nb.list(
+            "ipam/prefixes/", {"prefix": "10.99.10.0/24", "vrf_id": vrf["id"]}, limit=1
+        )
+        for path, obj_id in (
+            ("dcim/devices/", devs["lab-ap1"]["id"]),
+            ("ipam/prefixes/", users_prefix[0]["id"]),
+            ("ipam/vlans/", vlans[10]["id"]),
+            ("ipam/vrfs/", vrf["id"]),
+            ("circuits/circuits/", circuit["id"]),
+        ):
+            await self.patch(path, obj_id, {"tenant": tenant["id"]})
+        cgroup = await self.ensure(
+            "tenancy/contact-groups/", {"slug": "mcp-lab-contacts"}, {"name": "MCP Lab Contacts"}
+        )
+        croles = {
+            slug: await self.ensure("tenancy/contact-roles/", {"slug": slug}, {"name": name})
+            for slug, name in (("mcp-noc", "NOC"), ("mcp-owner", "Owner"))
+        }
+        noc = await self.ensure(
+            "tenancy/contacts/",
+            {"name": "MCP NOC"},
+            {"groups": [cgroup["id"]], "email": "noc@mcp.lab", "phone": "+61 2 5550 0100"},
+        )
+        alex = await self.ensure(
+            "tenancy/contacts/", {"name": "Alex Admin"}, {"groups": [cgroup["id"]], "email": "alex@mcp.lab"}
+        )
+        for obj_type, obj_id, contact, role, priority in (
+            ("dcim.site", site["id"], noc, "mcp-noc", "primary"),
+            ("dcim.device", devs["lab-sw1"]["id"], alex, "mcp-owner", "primary"),
+            ("tenancy.tenant", tenant["id"], alex, "mcp-owner", "secondary"),
+        ):
+            await self.ensure(
+                "tenancy/contact-assignments/",
+                {"object_type": obj_type, "object_id": obj_id, "contact_id": contact["id"]},
+                {"contact": contact["id"], "role": croles[role]["id"], "priority": priority},
+            )
+
         # --- Config template (via the IOS-XE platform) and config contexts ---
         template = await self.ensure(
             "extras/config-templates/", {"name": "MCP IOS-XE base"}, {"template_code": CONFIG_TEMPLATE}
@@ -636,6 +741,13 @@ class Seeder:
                 await self.nb.request("DELETE", path, json=[{"id": o["id"]} for o in objs])
                 print(f"  deleted {len(objs)} from {path}")
         order = [
+            "tenancy/contact-assignments/",
+            "tenancy/contacts/",
+            "tenancy/contact-roles/",
+            "tenancy/contact-groups/",
+            "ipam/services/",
+            "virtualization/virtual-disks/",
+            "virtualization/virtual-machines/",
             "dcim/cables/",
             "vpn/tunnel-terminations/",
             "vpn/tunnels/",
@@ -654,6 +766,8 @@ class Seeder:
             "dcim/rear-ports/",
             "dcim/interfaces/",
             "dcim/devices/",
+            "virtualization/clusters/",
+            "virtualization/cluster-types/",
             "dcim/power-feeds/",
             "dcim/power-panels/",
             "circuits/circuit-terminations/",
@@ -677,6 +791,8 @@ class Seeder:
             "extras/config-templates/",
             "dcim/manufacturers/",
             "dcim/device-roles/",
+            "tenancy/tenants/",
+            "tenancy/tenant-groups/",
             "dcim/sites/",
         ]
         for path in order:

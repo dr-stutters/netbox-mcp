@@ -33,6 +33,7 @@ from netbox_mcp.tools import (
     sites,
     spec,
     system,
+    tenancy,
     writes,
 )
 
@@ -48,7 +49,8 @@ cables, IP addresses, prefixes, VLANs, VRFs and virtual machines.
   netbox_next_available_asns, netbox_vlan_lookup,
   netbox_change_history, netbox_journal, netbox_data_hygiene, netbox_render_config,
   netbox_config_context, netbox_custom_fields, netbox_circuit_summary, netbox_tunnel_summary,
-  netbox_l2vpn_summary, netbox_wireless_lookup, netbox_power_trace.
+  netbox_l2vpn_summary, netbox_wireless_lookup, netbox_power_trace, netbox_cluster_summary,
+  netbox_service_lookup, netbox_tenant_summary, netbox_contacts_for.
 - netbox_list_objects / netbox_get_object work for any object type ('dcim.devices', 'ipam.prefixes', ...).
 - Not sure of a type, field or filter name? netbox_get_definition and netbox_search_spec describe the API.
 - netbox_api_call reaches any endpoint the other tools don't cover.
@@ -127,6 +129,7 @@ def create_server(settings: Settings, *, auth: AuthProvider | None = None) -> Fa
         history,
         hygiene,
         config,
+        tenancy,
         generic,
         spec,
         writes,

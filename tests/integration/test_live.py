@@ -195,3 +195,21 @@ async def test_power_trace(client: Client[Any]) -> None:
     assert chain[1] == "lab-pdu1 Outlet1 (outlet, leg A)"
     assert chain[-1] == "MCP Panel A (panel)"
     assert out["rack_budget"]["capacity_w"] == 2944
+
+
+async def test_cluster_services_tenancy(client: Client[Any]) -> None:
+    cluster = await call(client, "netbox_cluster_summary", cluster="mcp-lab-cluster")
+    assert cluster["vms_per_host"] == {"lab-hv1": 2}
+    assert cluster["allocated"]["vcpus"] == 6
+
+    https = await call(client, "netbox_service_lookup", port=443)
+    assert any(s["host"] == "mcp-vm1 (vm)" for s in https["services"])
+
+    tenant = await call(client, "netbox_tenant_summary", tenant="mcp-corp")
+    assert tenant["examples"]["devices"] == ["lab-ap1"]
+
+    contacts = await call(client, "netbox_contacts_for", object_type="devices", object="lab-ap1")
+    assert {(c["name"], c.get("via")) for c in contacts["contacts"]} == {
+        ("MCP NOC", "site MCP Lab"),
+        ("Alex Admin", "tenant MCP Corp"),
+    }

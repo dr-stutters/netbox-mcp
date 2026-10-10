@@ -99,7 +99,7 @@ entry can be added to and read back from a device.
 
 **Seed:** a provider and circuit, a tunnel, a wireless LAN, and a power panel/feed/PDU chain.
 
-### 2.8 Virtualization, services & tenancy
+### 2.8 Virtualization, services & tenancy ✅
 
 | Tool | API | Notes |
 |---|---|---|
