@@ -1,123 +1,306 @@
 # netbox-mcp
 
-A [FastMCP](https://gofastmcp.com) server for NetBox 4.x. See [PLAN.md](PLAN.md) for the design and roadmap.
+An [MCP](https://modelcontextprotocol.io) server that lets Claude, or any MCP client, work with
+[NetBox](https://netboxlabs.com/oss/netbox/), the network source of truth. Ask questions in plain
+language and the model uses NetBox's API for you:
 
-## Setup
+> *"Where is 10.99.99.11?"* · *"Summarise lab-sw1"* · *"Trace the cable from lab-sw1 Gi1/0/3"* ·
+> *"What's on VLAN 10?"* · *"Give me the next free /24 in 10.99.0.0/16 and reserve it for the lab"*
+
+Built with [FastMCP](https://gofastmcp.com) for **NetBox 4.x** (tested on 4.7).
+
+## Features
+
+- **Task-shaped tools**: IP and MAC lookup, device and interface summaries, end-to-end cable traces
+  through patch panels, prefix utilisation, next free IPs and prefixes, and VLAN usage.
+- **Works with every object type**: generic list, get, create, update and delete for all of
+  NetBox's ~140 object types, plus tools that let the model explore NetBox's own API schema.
+- **Catches silent mistakes**: NetBox ignores misspelled filter and field names, which can return
+  every object or quietly drop data. This server checks them against the schema first and replies
+  with "did you mean …?".
+- **Read-only by default**: write tools exist only when you turn them on.
+- **Small responses**: compact JSON with empty fields and links removed, to save the model's context.
+- **Runs two ways**: locally over stdio (Claude Code), or as a shared HTTP service in Docker with
+  per-person bearer tokens and a log of who called what.
+
+## Contents
+
+- [Requirements](#requirements)
+- [1. Create a NetBox API token](#1-create-a-netbox-api-token)
+- [2a. Install locally for Claude Code](#2a-install-locally-for-claude-code-stdio)
+- [2b. Run as a shared server with Docker](#2b-run-as-a-shared-server-with-docker)
+- [2c. Put it on the internet with Caddy, for Claude Desktop / claude.ai](#2c-put-it-on-the-internet-with-caddy-for-claude-desktop--claudeai)
+- [Configuration reference](#configuration-reference)
+- [Tools](#tools)
+- [Security notes](#security-notes)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+
+## Requirements
+
+- A **NetBox 4.x** instance that's reachable from wherever this server runs.
+- **For local use:** [uv](https://docs.astral.sh/uv/getting-started/installation/). uv installs
+  Python 3.12+ for you if needed.
+- **For a shared server:** Docker with the Compose plugin.
+
+## 1. Create a NetBox API token
+
+Using a dedicated service account is recommended, so that changes made through the MCP server are
+clearly labelled in NetBox's changelog.
+
+1. **Admin → Authentication → Users → Add.** Create a user such as `netbox-mcp`. Leave staff and
+   superuser unticked.
+2. **Admin → Authentication → Permissions → Add.** Select all object types and tick **View**.
+   Assign the permission to `netbox-mcp`. If you'll enable writes, also tick
+   **Add / Change / Delete**.
+3. **Admin → API Tokens → Add.** Pick the `netbox-mcp` user. Tick **Write enabled** only if you'll
+   enable writes. Copy the token straight away, because NetBox shows it only once.
+
+Both v2 tokens (`nbt_…`, NetBox 4.5+) and older v1 tokens work. Paste the token on its own, without
+a `Bearer` or `Token` prefix.
+
+## 2a. Install locally for Claude Code (stdio)
 
 ```bash
+git clone https://github.com/dr-stutters/netbox-mcp.git
+cd netbox-mcp
 uv sync
-cp .env.example .env   # then set NETBOX_URL and NETBOX_TOKEN
+cp .env.example .env
 ```
 
-## Use with Claude Code (stdio)
+Edit `.env` and set at least:
+
+```ini
+NETBOX_URL=https://netbox.example.com
+NETBOX_TOKEN=nbt_xxxxxxxx.yyyyyyyy
+# NETBOX_MCP_ENABLE_WRITES=true   # optional: allow changes
+```
+
+Register the server with Claude Code. Use the full path to the folder you cloned:
 
 ```bash
-claude mcp add netbox -s user -- uv --directory /path/to/Netbox-MCP run netbox-mcp
+claude mcp add netbox -s user -- uv --directory /full/path/to/netbox-mcp run netbox-mcp
 ```
 
-`uv --directory` runs the server from the project folder, so it picks up `.env`.
+Start a new Claude Code session and ask *"check the NetBox connection"*. The model calls
+`netbox_status`, which reports the NetBox version, the API user, and whether writes are enabled.
 
-## Run as a shared HTTP server (Docker)
+> `uv --directory` runs the server from the project folder, so it reads that folder's `.env`. Your
+> NetBox token stays in `.env` and is never stored in Claude's config.
 
-The image serves Streamable HTTP at `/mcp` (bearer-token auth) and an unauthenticated liveness
-check at `/health`. It refuses to start in HTTP mode without at least one token.
+## 2b. Run as a shared server with Docker
 
-1. **Configure** — copy `.env.example` to `.env` and set `NETBOX_URL`, `NETBOX_TOKEN` and, if wanted,
-   `NETBOX_MCP_ENABLE_WRITES=true` and `MCP_PUBLISH_PORT`.
-2. **Create a token per person** — each run prints the raw token (give it to that person) and a
-   hashed entry for the server, so `.env` never holds a usable secret:
+The container serves MCP over HTTP at `/mcp`, protected by bearer tokens, plus an unauthenticated
+`/health` check. **It won't start without at least one token.**
 
-   ```bash
-   uv run netbox-mcp token alice
-   # or, without a local Python setup:
-   docker compose run --rm --no-deps netbox-mcp netbox-mcp token alice
+```bash
+git clone https://github.com/dr-stutters/netbox-mcp.git
+cd netbox-mcp
+cp .env.example .env
+```
+
+Edit `.env` and set `NETBOX_URL`, `NETBOX_TOKEN` and, optionally, `NETBOX_MCP_ENABLE_WRITES=true`
+and `MCP_PUBLISH_PORT` (the host port, default `8000`).
+
+**Create a token for each person.** Each run prints a raw token and a hashed entry:
+
+```bash
+docker compose run --rm --no-deps netbox-mcp netbox-mcp token alice
+```
+
+- Give the raw token to Alice. It isn't stored anywhere.
+- Add the printed `alice:sha256:…` line to `MCP_AUTH_TOKENS` in `.env`. Separate several people
+  with commas: `MCP_AUTH_TOKENS=alice:sha256:…,bob:sha256:…`.
+
+Because `.env` holds only hashes, a leaked `.env` doesn't expose usable tokens.
+
+**Start it:**
+
+```bash
+docker compose up -d --build
+docker compose ps         # wait for "(healthy)"
+docker compose logs -f    # every tool call is logged as: tool=… caller=alice
+```
+
+**Connect Claude Code to it:**
+
+```bash
+claude mcp add --transport http netbox-remote http://<docker-host>:8000/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+**Managing access:**
+- **Add someone:** generate a token, add their entry to `MCP_AUTH_TOKENS`, then run
+  `docker compose up -d`.
+- **Revoke someone:** delete their entry, then run `docker compose up -d`.
+- **Update the server:** run `git pull && docker compose up -d --build`.
+
+> If your NetBox uses an internal CA, mount the CA file into the container (for example add
+> `- ./ca.pem:/certs/ca.pem:ro` under `volumes:`) and set `NETBOX_CA_BUNDLE=/certs/ca.pem`.
+
+Plain HTTP is fine on a trusted LAN or VPN. For anything else, use the HTTPS setup below.
+
+## 2c. Put it on the internet with Caddy, for Claude Desktop / claude.ai
+
+Claude Desktop and claude.ai **custom connectors connect from Anthropic's cloud**, not from your
+computer. The server therefore needs a public HTTPS address, which a reverse proxy such as
+[Caddy](https://caddyserver.com) provides, with automatic certificates.
+
+1. On the VPS, follow [2b](#2b-run-as-a-shared-server-with-docker), but keep the port private to
+   the VPS so only Caddy can reach it:
+
+   ```ini
+   MCP_PUBLISH_PORT=127.0.0.1:8000
    ```
 
-   Add the printed `alice:sha256:...` entries to `MCP_AUTH_TOKENS` (comma-separated). To revoke
-   someone, delete their entry and `docker compose up -d`.
-3. **Start**:
+   The VPS must be able to reach `NETBOX_URL`. A NetBox on a private home network needs a VPN, such
+   as WireGuard or Tailscale.
 
-   ```bash
-   docker compose up -d --build
-   docker compose ps        # should show (healthy)
-   docker compose logs -f   # each tool call is logged with the caller's token name
+2. Add a site to your Caddyfile, then reload Caddy:
+
+   ```caddyfile
+   netbox-mcp.example.com {
+       reverse_proxy 127.0.0.1:8000
+   }
    ```
 
-4. **Connect a client** to `http://<host>:<MCP_PUBLISH_PORT>/mcp` with the header
-   `Authorization: Bearer <token>`. For Claude Code:
+   If Caddy itself runs in Docker, attach both containers to a shared Docker network and use
+   `reverse_proxy netbox-mcp:8000` instead.
+
+3. Check that it's reachable. The first command should print `{"status":"ok"}` and the second `401`:
 
    ```bash
-   claude mcp add --transport http netbox-remote http://<host>:8000/mcp \
-     --header "Authorization: Bearer <token>"
+   curl https://netbox-mcp.example.com/health
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST https://netbox-mcp.example.com/mcp
    ```
 
-**Claude Desktop / claude.ai custom connectors** connect from Anthropic's cloud, not from your
-machine, so the URL must be reachable from the internet over HTTPS. Put the container behind a
-reverse proxy or tunnel that terminates TLS (Caddy, Traefik, nginx, Cloudflare Tunnel, ...) and use
-`https://<public-name>/mcp`. Keep plain HTTP for trusted LAN/VPN use only.
+4. In Claude, go to **Settings → Connectors → Add custom connector**:
+   - **URL:** `https://netbox-mcp.example.com/mcp`
+   - **Request headers:** `Authorization` = `Bearer <token>`
+
+   Request-header authentication for custom connectors was rolled out gradually. If you don't see
+   a Request headers section, update the Claude app.
+
+## Configuration reference
+
+All settings are environment variables. They can go in `.env`, or in Docker as `environment:` or
+`env_file:` entries.
+
+| Variable | Default | Description |
+|---|---|---|
+| `NETBOX_URL` | **required** | NetBox base URL, `http://` or `https://`, without `/api` |
+| `NETBOX_TOKEN` | **required** | NetBox API token |
+| `NETBOX_VERIFY_SSL` | `true` | Set `false` to skip TLS verification (labs only) |
+| `NETBOX_CA_BUNDLE` | — | Path to a CA certificate file for an internal CA |
+| `NETBOX_TIMEOUT` | `30` | NetBox request timeout, in seconds |
+| `NETBOX_MCP_ENABLE_WRITES` | `false` | Turns on the create, update, delete and allocate tools |
+| `NETBOX_MCP_CACHE_DIR` | `~/.cache/netbox-mcp` | Where the schema index is cached (`/cache` in Docker). Empty turns caching off |
+| `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (the Docker image uses `http`) |
+| `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP bind address and port inside the container |
+| `MCP_PATH` | `/mcp` | HTTP endpoint path |
+| `MCP_AUTH_TOKENS` | — | Bearer tokens as `name:sha256:<hash>` or `name:<raw>`, comma-separated. Required for HTTP |
+| `MCP_AUTH_TOKENS_FILE` | — | The same format, one entry per line, read from a file (e.g. a Docker secret) |
+| `MCP_PUBLISH_PORT` | `8000` | Host port Docker Compose publishes (`127.0.0.1:8000` = local only) |
+| `LOG_LEVEL` | `INFO` | Logging level |
 
 ## Tools
 
-| Tool | Purpose |
-|---|---|
-| `netbox_status` | Connection check: NetBox version, API user, writes enabled? |
-| `netbox_search` | Search many object types at once (devices, VMs, IPs, prefixes, VLANs, cables, ...) |
-| `netbox_lookup_ip` | IP → address object, assigned device/VM + interface, containing prefixes, VLAN, VRF |
-| `netbox_lookup_mac` | MAC (any format) → interface, device/VM and its IPs |
-| `netbox_device_summary` | Device or VM overview with every interface's IPs, VLANs, LAG, MAC, cable and peer |
-| `netbox_interface_detail` | One interface in depth (abbreviations like `Gi1/0/1` work) |
-| `netbox_trace_cable` | End-to-end cable path through patch panels and circuits |
-| `netbox_prefix_utilization` | Utilisation (NetBox's rules), child prefixes, first free IP / free blocks |
-| `netbox_next_available_ips` | Peek at the next free IPs in a prefix |
-| `netbox_next_available_prefixes` | Peek at free blocks, or the next N child prefixes of a given length |
-| `netbox_vlan_lookup` | VLAN by VID/name with its prefixes and tagged/untagged interfaces |
-| `netbox_list_object_types` | Object types usable with the generic tools, grouped by app |
-| `netbox_list_objects` | List/filter any object type (filters are validated against the schema) |
-| `netbox_get_object` | One object by type + ID |
-| `netbox_search_spec` | Keyword search over NetBox's OpenAPI spec |
-| `netbox_get_definition` | Fields, enum choices, writable/required fields and filters for a type |
-| `netbox_api_call` | Any REST endpoint (GET only unless writes are enabled) |
+### Everyday tasks
 
-### Write tools (only when `NETBOX_MCP_ENABLE_WRITES=true`)
-
-| Tool | Purpose |
+| Tool | What it does |
 |---|---|
-| `netbox_create_object` | Create one or many objects of any type |
+| `netbox_status` | Connection check: NetBox version, API user, whether writes are enabled |
+| `netbox_search` | Search devices, VMs, interfaces, IPs, prefixes, VLANs, sites, racks, cables, circuits… at once |
+| `netbox_lookup_ip` | IP → its device or VM and interface, containing prefixes, VLAN and VRF. Works even if the IP isn't recorded |
+| `netbox_lookup_mac` | MAC in any format → its interface, device or VM, and IPs |
+| `netbox_device_summary` | Device or VM overview: every interface with its IPs, VLANs, LAG, MAC, cable and far-end peer |
+| `netbox_interface_detail` | One interface in depth. Short names like `Gi1/0/1` or `Po1` work |
+| `netbox_trace_cable` | Full cable path through patch panels and circuits, and whether it's complete |
+| `netbox_prefix_utilization` | Utilisation, using NetBox's own rules, plus child prefixes and the first free IP or free blocks |
+| `netbox_next_available_ips` | Preview the next free IPs in a prefix |
+| `netbox_next_available_prefixes` | Preview free blocks, or the next N child prefixes of a given size |
+| `netbox_vlan_lookup` | VLAN by ID or name, with its prefixes and the tagged and untagged interfaces carrying it |
+
+### Any object type
+
+| Tool | What it does |
+|---|---|
+| `netbox_list_object_types` | The ~140 object types the generic tools accept |
+| `netbox_list_objects` | List and filter any type. Filter names are checked |
+| `netbox_get_object` | One object by type and ID |
+| `netbox_search_spec` | Keyword search over NetBox's API spec, to find endpoints |
+| `netbox_get_definition` | A type's fields, choice values, required fields and valid filters |
+| `netbox_api_call` | Any REST endpoint. GET only unless writes are enabled |
+
+### Changes (only with `NETBOX_MCP_ENABLE_WRITES=true`)
+
+| Tool | What it does |
+|---|---|
+| `netbox_create_object` | Create one or many objects. Field names are checked |
 | `netbox_update_object` | Partial update of one object, or the same change across many |
-| `netbox_delete_object` | Delete by id (all ids must exist, or nothing is deleted) |
-| `netbox_allocate_ips` | Atomically reserve the next free IP(s); optionally assign to an interface and set as primary |
-| `netbox_allocate_prefix` | Atomically carve the next free child prefix(es) of a given length |
+| `netbox_delete_object` | Delete by ID. If any ID is missing, nothing is deleted |
+| `netbox_allocate_ips` | Reserve the next free IP(s) atomically. Optionally assign to an interface and set as primary |
+| `netbox_allocate_prefix` | Carve the next free child prefix(es) atomically |
 
-With writes enabled, `netbox_api_call` also accepts POST/PUT/PATCH/DELETE. When writes are off, these
-tools are not registered at all. NetBox silently ignores unknown field names on create/update, so the
-server checks every field name against the schema first and suggests corrections for typos. Writes
-are logged to the `netbox_mcp.audit` logger.
+## Security notes
 
-Results are compact JSON: URLs, empty values and zero counts are dropped and nested objects are
-reduced to `{id, display}`. Pass `response_format="markdown"` for a table.
+- **Read-only unless you opt in.** When writes are off, the write tools aren't registered at all.
+  The NetBox token's own permissions are a second safeguard, so give it only what it needs.
+- **HTTP requires tokens.** The server refuses to start in HTTP mode without them. Tokens are
+  checked in constant time and can be stored as SHA-256 hashes.
+- **Audit trail.** Every tool call is logged with the caller's token name, and writes are also
+  logged to the `netbox_mcp.audit` logger. In NetBox's changelog, changes appear under the service
+  account's name.
+- **Shared credential.** Everyone uses the same NetBox service account. If you need per-user NetBox
+  permissions, run separate instances with different NetBox tokens.
+- **The container is locked down:** non-root user, read-only filesystem, no Linux capabilities, and
+  no `.env` baked into the image.
+- **Use HTTPS beyond a trusted network**, both for the MCP endpoint (via Caddy) and, ideally, for
+  `NETBOX_URL`.
 
-The NetBox OpenAPI schema is fetched on first use and cached as a compact index in
-`NETBOX_MCP_CACHE_DIR` (default `~/.cache/netbox-mcp`), keyed by NetBox URL and version.
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `NetBox denied access (403)` | The token is wrong or expired, or the user lacks permission for that object type |
+| `Could not connect … TLS verification failed` | Set `NETBOX_CA_BUNDLE`, or `NETBOX_VERIFY_SSL=false` in a lab |
+| `HTTP transport requires MCP_AUTH_TOKENS` | Generate a token (`netbox-mcp token <name>`) and add the entry to `.env` |
+| Client gets `401 Unauthorized` | The header must be exactly `Authorization: Bearer <raw token>`, not the `sha256:` entry |
+| `Unknown filter` / `Unknown field` | Working as intended: NetBox would silently ignore it. Use the suggested name, or check `netbox_get_definition` |
+| Write tools missing | Set `NETBOX_MCP_ENABLE_WRITES=true` and restart. For Claude Code, start a new session |
+| Container not `(healthy)` | Run `docker compose logs` and look for configuration errors at startup |
 
 ## Development
 
 ```bash
-uv run pytest          # unit tests (mocked NetBox)
-uv run ruff check .
-uv run mypy
+uv sync
+uv run pytest            # unit tests (NetBox is mocked)
+uv run ruff check .      # lint
+uv run mypy              # strict type checks
 ```
 
-Integration tests run read-only checks against a live NetBox seeded with a small lab topology
-(everything tagged `mcp-test`):
+Integration tests run against a real NetBox seeded with a small lab topology: site "MCP Lab",
+routers, switches, patch panels, cables, VLANs and prefixes, all tagged `mcp-test`.
 
 ```bash
 uv run python scripts/seed_lab.py            # create the lab (safe to re-run)
-uv run pytest tests/integration
-uv run python scripts/seed_lab.py --delete   # remove it again
+uv run pytest tests/integration              # read-only checks
+NETBOX_MCP_TEST_WRITES=1 uv run pytest tests/integration   # also create/delete test objects
+uv run python scripts/seed_lab.py --delete   # remove everything tagged mcp-test
 ```
 
-Write-path integration tests create and delete their own objects, so they are opt-in:
+Project layout:
 
-```bash
-NETBOX_MCP_TEST_WRITES=1 uv run pytest tests/integration
 ```
+src/netbox_mcp/
+  __init__.py      CLI entry point (server, `token` subcommand)
+  config.py        settings from env / .env
+  client.py        async NetBox REST client (auth, paging, retries, errors)
+  schema.py        OpenAPI schema index: type resolution, filter/field checks, spec search
+  auth.py          bearer-token verifier for HTTP
+  server.py        FastMCP app, health route, call logging
+  formatting.py    compact JSON and Markdown output
+  tools/           search, devices, cabling, ipam, generic, spec, writes
+```
+
+See [PLAN.md](PLAN.md) for the design notes and roadmap.

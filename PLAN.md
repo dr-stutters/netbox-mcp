@@ -158,7 +158,7 @@ OpenAPI schema is fetched once from `/api/schema/?format=json`, cached in memory
 2. ✅ **Generic + schema tools** — object-type registry, list/get, `search_spec`, `get_definition`, read-only `api_call`. Unit tests.
 3. ✅ **Curated reads** — search, IP/MAC lookup, device/interface summary, cable trace, IPAM helpers, VLAN lookup. Unit + integration tests.
 4. ✅ **Writes** — env-gated generic create/update/delete, allocate IPs/prefix, `api_call` write methods.
-5. **HTTP + auth + Docker** — Streamable HTTP, bearer verifier with named tokens, `/health`, Dockerfile, compose, README with Claude Code & Desktop setup.
+5. ✅ **HTTP + auth + Docker** — Streamable HTTP, bearer verifier with named tokens, `/health`, Dockerfile, compose, README with Claude Code & Desktop setup.
 6. **Hardening** — eval questions (10 realistic NetBox Q&As run through Claude), output-size tuning, CI.
 7. **Later: CML** — NetBox as source of truth for CML labs (design TBD).
 
