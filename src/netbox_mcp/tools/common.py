@@ -19,9 +19,8 @@ def label(obj: dict[str, Any] | int | str | None) -> str | None:
         return None
     if not isinstance(obj, dict):
         return str(obj)
-    return str(
-        obj.get("display") or obj.get("name") or obj.get("address") or obj.get("prefix") or obj.get("id")
-    )
+    value = obj.get("display") or obj.get("name") or obj.get("address") or obj.get("prefix") or obj.get("id")
+    return None if value is None else str(value)
 
 
 def choice(v: Any) -> Any:

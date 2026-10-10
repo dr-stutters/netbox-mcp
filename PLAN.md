@@ -57,11 +57,11 @@ entry can be added to and read back from a device.
 
 **Seed:** add a location, two racks, rack positions for lab devices, and a reservation.
 
-### 2.3 Complete cabling
+### 2.3 Complete cabling ✅
 
 | Tool | API | Notes |
 |---|---|---|
-| `netbox_whats_connected` | `dcim/connected-device/` | Given a device + interface, the device on the far end (the LLDP-style question) |
+| `netbox_whats_connected` | interface `connected_endpoints` (+ devices) | Given a device + interface, what's on the far end (the LLDP-style question). Built on the interface's own path data rather than `dcim/connected-device/`, which only handles device endpoints and returns 404 for circuits |
 | `netbox_trace_cable` (extend) | `front-ports/{id}/paths/`, `rear-ports/{id}/paths/`, `circuit-terminations/{id}/paths/` | Trace from patch panel ports and circuit terminations too, listing every path through them |
 
 ### 2.4 Data hygiene report

@@ -216,7 +216,8 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `netbox_lookup_mac` | MAC in any format → its interface, device or VM, and IPs |
 | `netbox_device_summary` | Device or VM overview: every interface with its IPs, VLANs, LAG, MAC, cable and far-end peer |
 | `netbox_interface_detail` | One interface in depth. Short names like `Gi1/0/1` or `Po1` work |
-| `netbox_trace_cable` | Full cable path through patch panels and circuits, and whether it's complete |
+| `netbox_whats_connected` | What's plugged into an interface: the far-end device (through patch panels) with its role, rack position and primary IP, or the circuit/provider network |
+| `netbox_trace_cable` | Full cable path through patch panels and circuits, and whether it's complete. Also traces from patch-panel front/rear ports and circuit terminations (by circuit ID), listing every path through them |
 | `netbox_prefix_utilization` | Utilisation, using NetBox's own rules, plus child prefixes and the first free IP or free blocks |
 | `netbox_next_available_ips` | Preview the next free IPs in a prefix |
 | `netbox_next_available_prefixes` | Preview free blocks, or the next N child prefixes of a given size |

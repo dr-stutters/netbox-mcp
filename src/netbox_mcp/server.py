@@ -27,10 +27,11 @@ log = logging.getLogger(__name__)
 INSTRUCTIONS = """\
 Tools for NetBox, the network source of truth (DCIM + IPAM): sites, racks, devices, interfaces,
 cables, IP addresses, prefixes, VLANs, VRFs and virtual machines.
-- Start with the task tools: netbox_search, netbox_lookup_ip, netbox_lookup_mac, netbox_device_summary,
-  netbox_interface_detail, netbox_trace_cable, netbox_prefix_utilization, netbox_next_available_ips,
-  netbox_next_available_prefixes, netbox_vlan_lookup, netbox_site_summary, netbox_rack_elevation,
-  netbox_find_rack_space, netbox_change_history, netbox_journal.
+- Start with the task tools: netbox_search, netbox_lookup_ip, netbox_lookup_mac,
+  netbox_device_summary, netbox_interface_detail, netbox_whats_connected, netbox_trace_cable,
+  netbox_site_summary, netbox_rack_elevation, netbox_find_rack_space, netbox_prefix_utilization,
+  netbox_next_available_ips, netbox_next_available_prefixes, netbox_vlan_lookup,
+  netbox_change_history, netbox_journal.
 - netbox_list_objects / netbox_get_object work for any object type ('dcim.devices', 'ipam.prefixes', ...).
 - Not sure of a type, field or filter name? netbox_get_definition and netbox_search_spec describe the API.
 - netbox_api_call reaches any endpoint the other tools don't cover.
