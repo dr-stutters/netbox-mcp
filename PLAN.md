@@ -1,169 +1,140 @@
-# NetBox MCP Server — Plan
+# NetBox MCP — Roadmap
 
-A FastMCP server that lets Claude query (and, when explicitly enabled, modify) a NetBox instance.
-Built from scratch; no code reused from other MCP servers.
+Phase 1 (done) delivered the core server. Phase 2 adds dedicated tools for the parts of NetBox's
+API that are currently reachable only through the generic tools. Items are built **one at a time**:
+each one gets its own branch and PR, with unit tests, live integration tests against the seeded lab
+(`scripts/seed_lab.py`), and README updates.
 
-## 1. Scope decisions
+## Conventions for every item
 
-| Area | Decision |
+- **Tool design:** task-shaped names (`netbox_<verb>_<thing>`), human-friendly inputs (names, CIDRs,
+  abbreviations) with ids as an alternative, compact JSON output, and clear errors with
+  "did you mean" hints.
+- **Writes:** registered only when `NETBOX_MCP_ENABLE_WRITES=true`. Field names are checked against
+  the schema, and every change is logged with the caller's name.
+- **Seed data:** if an item needs data the lab doesn't have (racks, circuits, …), extend
+  `scripts/seed_lab.py`. Everything stays tagged `mcp-test`.
+- **Definition of done:** unit tests + integration tests pass, `ruff` and `mypy --strict` are clean,
+  the README tool tables are updated, the PR is merged, and the container on cortex is rebuilt.
+
+---
+
+## Phase 1 — done ✅
+
+| # | Milestone | Result |
+|---|---|---|
+| 1 | Skeleton | uv project, config, async NetBox client (v1/v2 tokens, HTTP/HTTPS, retries, errors) |
+| 2 | Generic + schema tools | list/get any type, schema-validated filters, spec search, definitions, `api_call` |
+| 3 | Curated reads | search, IP/MAC lookup, device/interface summary, cable trace, IPAM helpers, VLAN lookup |
+| 4 | Writes | env-gated create/update/delete, IP/prefix allocation, schema-validated fields |
+| 5 | HTTP + Docker | bearer-token auth (named, hashed), `/health`, hardened container, deployed on cortex:8031 |
+| — | Docs | README user guide (local, Docker, Caddy/VPS, config reference) |
+
+---
+
+## Phase 2 — new tools (in order)
+
+### 2.1 Change history & journal
+
+Who changed what and when, plus the ability to leave notes on objects.
+
+| Tool | API | Notes |
+|---|---|---|
+| `netbox_change_history` | `core/object-changes/` | Filter by object (type + name/id), user, action (create/update/delete) and time window (`since="7d"` or ISO dates). For updates, return **only the fields that changed** (diff of `prechange_data` / `postchange_data`), not whole snapshots. Include the change `message` and `request_id` so changes made together can be grouped. |
+| `netbox_journal` | `extras/journal-entries/` (GET) | Read the journal entries for an object |
+| `netbox_add_journal_entry` *(write)* | `extras/journal-entries/` (POST) | Add a note (`info` / `success` / `warning` / `danger`) to any object, referenced by type + name/id |
+
+**Done when:** "what changed on lab-sw1 in the last day?" returns field-level diffs, and a journal
+entry can be added to and read back from a device.
+
+### 2.2 Site summary & rack space
+
+| Tool | API | Notes |
+|---|---|---|
+| `netbox_site_summary` | sites, locations, racks, devices, prefixes, VLANs, circuit terminations | One call: site details, device counts by role and status, racks with utilisation, prefixes and VLANs scoped to the site, circuits landing there |
+| `netbox_rack_elevation` | `dcim/racks/{id}/elevation/` | Unit-by-unit occupancy (front/rear), with free ranges summarised |
+| `netbox_find_rack_space` | racks + elevation | "Where can a 2U device go?" across a site or location, returning racks and free unit positions |
+
+**Seed:** add a location, two racks, rack positions for lab devices, and a reservation.
+
+### 2.3 Complete cabling
+
+| Tool | API | Notes |
+|---|---|---|
+| `netbox_whats_connected` | `dcim/connected-device/` | Given a device + interface, the device on the far end (the LLDP-style question) |
+| `netbox_trace_cable` (extend) | `front-ports/{id}/paths/`, `rear-ports/{id}/paths/`, `circuit-terminations/{id}/paths/` | Trace from patch panel ports and circuit terminations too, listing every path through them |
+
+### 2.4 Data hygiene report
+
+| Tool | API | Notes |
+|---|---|---|
+| `netbox_data_hygiene` | IPs, prefixes, devices, interfaces, VLANs, cables | Configurable checks, optionally scoped to a site or tenant: duplicate IPs (per VRF), active devices without a primary IP, IPs not inside any prefix, prefixes over a utilisation threshold, VLANs with no prefixes or interfaces, enabled uplinks without cables, devices with no site position or serial, interfaces without descriptions. Returns counts plus the first N offenders per check. |
+
+### 2.5 More allocation & cabling writes
+
+| Tool | API | Notes |
+|---|---|---|
+| `netbox_next_available_vlans` / `netbox_allocate_vlan` *(write)* | `ipam/vlan-groups/{id}/available-vlans/` | Peek at and reserve the next free VID in a group |
+| `netbox_next_available_asns` / `netbox_allocate_asn` *(write)* | `ipam/asn-ranges/{id}/available-asns/` | The same for ASNs |
+| IP-range support in IP tools | `ipam/ip-ranges/{id}/available-ips/` | `netbox_next_available_ips` / `netbox_allocate_ips` accept a range as well as a prefix |
+| `netbox_connect_cable` *(write)* | `dcim/cables/` | Connect by names: "lab-sw1 Gi1/0/5 → lab-pp1 FP2". Resolves port types, refuses ports that are already cabled, and sets label/type/colour/length |
+
+### 2.6 Config rendering & custom fields
+
+| Tool | API | Notes |
+|---|---|---|
+| `netbox_render_config` | `devices/{id}/render-config/`, `virtual-machines/{id}/render-config/` | Intended config from the assigned config template |
+| `netbox_config_context` | device/VM `config_context` | The merged config context for a device or VM, and which contexts contributed to it |
+| `netbox_custom_fields` | `extras/custom-fields/`, `custom-field-choice-sets/` | Which custom fields exist, what object types they apply to, their types and choices, so the model can filter on them (`cf_<name>`) |
+
+### 2.7 Domain summaries: circuits, VPN, wireless, power
+
+| Tool | API | Notes |
+|---|---|---|
+| `netbox_circuit_summary` | circuits, terminations, providers, paths | Provider/account, type, commit rate, both ends (site or provider network) and the device + interface at each end |
+| `netbox_tunnel_summary` | `vpn/tunnels/`, terminations, IPsec profiles | Endpoints, interfaces, outside IPs, crypto profile |
+| `netbox_l2vpn_summary` | `vpn/l2vpns/`, terminations | Type, identifier, member VLANs and interfaces across sites |
+| `netbox_wireless_lookup` | `wireless/wireless-lans/`, `wireless-links/` | SSID → group, VLAN, auth type, and the interfaces/APs serving it |
+| `netbox_power_trace` | power ports/outlets/feeds/panels `trace/` | Device PSU → PDU outlet → feed → panel, plus per-rack power budget |
+
+**Seed:** a provider and circuit, a tunnel, a wireless LAN, and a power panel/feed/PDU chain.
+
+### 2.8 Virtualization, services & tenancy
+
+| Tool | API | Notes |
+|---|---|---|
+| `netbox_cluster_summary` | clusters, VMs, virtual disks, devices | Hosts, VMs by status, total vCPU/RAM/disk, VMs per host |
+| `netbox_service_lookup` | `ipam/services/` | "What listens on port 443 / what runs on host X", with protocol, ports and IPs |
+| `netbox_tenant_summary` | tenants + scoped objects | Everything a tenant owns, by type |
+| `netbox_contacts_for` | `tenancy/contact-assignments/` | Who to contact for a device/site/circuit, by role and priority |
+
+### 2.9 Composite analysis
+
+| Tool | API | Notes |
+|---|---|---|
+| `netbox_impact_analysis` | cables, traces, VMs, circuits, VLANs | "What's affected if X goes down?": directly connected devices, VMs on a host, circuits terminating on it, VLANs/prefixes that lose an uplink |
+| `netbox_topology` | cables + traces | Neighbour graph for a device (N hops) or a site, as a Mermaid diagram plus an edge list |
+| `netbox_compare` | any two objects | Field-by-field differences between two devices/interfaces/VLANs, e.g. two switches in a pair |
+
+### 2.10 Automation hooks
+
+| Tool | API | Notes |
+|---|---|---|
+| `netbox_list_scripts` / `netbox_run_script` *(write)* | `extras/scripts/` | Discover custom scripts and their inputs, run one (with optional commit=false dry run) |
+| `netbox_job_status` | `core/jobs/` | Status and output of script/sync jobs |
+| `netbox_export` | export templates (`?export=`) | Run an export template for a filtered set (CSV, text) |
+| `netbox_graphql` | `/graphql/` | Read-only GraphQL for complex nested queries |
+
+---
+
+## Platform backlog (scheduled between items as needed)
+
+| Item | Why |
 |---|---|
-| Target | NetBox Community **4.7.2** (netbox-docker 5.1.1), vanilla — no plugins |
-| Framework | FastMCP (Python), latest stable at build time, pinned |
-| NetBox client | `httpx.AsyncClient`, direct REST (no pynetbox) |
-| Access mode | Read-only by default; write tools registered only when `NETBOX_MCP_ENABLE_WRITES=true` |
-| Write guardrails | Env flag only (no dry-run/confirm layer) |
-| NetBox credentials | One shared service token |
-| Transports | **stdio** (Claude Code, local) and **Streamable HTTP** (Docker, Claude Desktop custom connector) |
-| MCP auth (HTTP) | `Authorization: Bearer <token>` checked against configured tokens; none for stdio |
-| NetBox connection | HTTPS (with verify / custom CA / insecure options) **or** plain HTTP |
-| Output | Compact JSON by default; `response_format="markdown"` optional |
-| Tool design | Hybrid: curated task tools + generic CRUD + OpenAPI escape hatches |
-| Deployment | Own compose file on a separate Docker host, reaching NetBox over the network |
-| Users | Multiple people |
-| Out of scope (v1) | CML integration (later phase), OAuth/IdP, per-user NetBox tokens, plugins |
-
-## 2. Architecture
-
-```
-Claude Code ──stdio──┐
-                     ├─► FastMCP server ──httpx (Token/Bearer)──► NetBox 4.7 REST API
-Claude Desktop ─HTTP─┘   (bearer auth on HTTP only)                 /api/..., /api/schema/
-```
-
-### Project layout
-
-```
-netbox-mcp/
-├── pyproject.toml            # uv-managed, Python 3.12+
-├── src/netbox_mcp/
-│   ├── __main__.py           # CLI: --transport stdio|http, --host, --port
-│   ├── server.py             # FastMCP app, tool registration, write gating
-│   ├── config.py             # pydantic-settings, env vars (below)
-│   ├── auth.py               # bearer token verifier for HTTP transport
-│   ├── client.py             # NetBoxClient: httpx, pagination, errors, retries
-│   ├── schema.py             # OpenAPI schema loader + search/index (cached)
-│   ├── formatting.py         # compact JSON trimming + markdown renderer
-│   ├── objects.py            # object-type registry ("dcim.devices" → endpoint)
-│   └── tools/
-│       ├── search.py         # global search, IP/MAC lookup
-│       ├── devices.py        # device & interface summary
-│       ├── ipam.py           # prefix utilisation, next-available, VLAN/VRF
-│       ├── cabling.py        # cable path trace
-│       ├── generic.py        # list/get/create/update/delete for any type
-│       └── spec.py           # search_spec, get_definition, api_call
-├── tests/
-│   ├── unit/                 # respx-mocked httpx
-│   └── integration/          # opt-in, against a live/throwaway NetBox
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-└── README.md
-```
-
-## 3. Configuration (env vars)
-
-| Var | Default | Purpose |
-|---|---|---|
-| `NETBOX_URL` | — (required) | e.g. `https://netbox.lab.local` or `http://10.0.0.5:8000` |
-| `NETBOX_TOKEN` | — (required) | Shared service token |
-| `NETBOX_VERIFY_SSL` | `true` | Set `false` for self-signed lab certs |
-| `NETBOX_CA_BUNDLE` | — | Path to an internal CA PEM (takes precedence over verify flag) |
-| `NETBOX_TIMEOUT` | `30` | Request timeout (s) |
-| `NETBOX_MCP_ENABLE_WRITES` | `false` | Registers create/update/delete tools |
-| `NETBOX_MCP_CACHE_DIR` | `~/.cache/netbox-mcp` | Disk cache for the compact schema index (empty = off) |
-| `MCP_TRANSPORT` | `stdio` | `stdio` or `http` |
-| `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP bind |
-| `MCP_AUTH_TOKENS` | — | Comma-separated `name:token` pairs; required when transport is `http` |
-| `LOG_LEVEL` | `INFO` | |
-
-Notes:
-- **Token header**: NetBox 4.5+ supports v2 tokens (`nbt_…`, sent as `Authorization: Bearer`) alongside legacy v1 (`Authorization: Token`). The client auto-detects by prefix, so either works.
-- **HTTP vs HTTPS**: driven purely by the scheme in `NETBOX_URL`. Log a warning at startup when using `http://` (token travels in clear text).
-- **Per-person MCP tokens**: `name:token` pairs let each user have their own bearer token, so logs show *who* called which tool, and one person's access can be revoked without affecting others — even though NetBox sees a single service user.
-- Server refuses to start in HTTP mode without `MCP_AUTH_TOKENS` (fail closed).
-
-## 4. Tools (v1)
-
-All tools have explicit Pydantic-typed params, clear docstrings, and MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`). Reads accept `limit`/`offset` (default limit 50, max 1000) and `response_format`.
-
-### Curated — read
-| Tool | What it does | NetBox endpoints |
-|---|---|---|
-| `netbox_search` | Free-text search across devices, IPs, prefixes, VLANs, sites, circuits, VMs | `?q=` across key endpoints, merged & ranked |
-| `netbox_lookup_ip` | IP → address object, parent prefix(es), VRF, assigned interface/device/VM, site, VLAN | `ipam/ip-addresses`, `ipam/prefixes?contains=` |
-| `netbox_lookup_mac` | MAC → interface(s), device/VM, IPs on that interface | `dcim/mac-addresses`, `dcim/interfaces?mac_address=` |
-| `netbox_device_summary` | Device detail + role/platform/site/rack, primary IPs, interfaces (status, IPs, VLANs, cable, connected peer) | `dcim/devices`, `dcim/interfaces?device_id=`, `ipam/ip-addresses?device_id=` |
-| `netbox_interface_detail` | Single interface: IPs, VLAN mode/tagging, cable, link peer, LAG membership | `dcim/interfaces/{id}` |
-| `netbox_trace_cable` | Full cable path from an interface/port to its far end | `dcim/interfaces/{id}/trace/` (and front/rear ports, console ports) |
-| `netbox_prefix_utilization` | Prefix utilisation %, child prefixes, used/free counts | `ipam/prefixes/{id}`, `?parent=` |
-| `netbox_next_available_ips` | Next N free IPs in a prefix (read-only peek) | `ipam/prefixes/{id}/available-ips/` (GET) |
-| `netbox_next_available_prefixes` | Free child prefixes of a given length | `ipam/prefixes/{id}/available-prefixes/` (GET) |
-| `netbox_vlan_lookup` | VLAN by VID/name/group/site, with prefixes and interfaces using it | `ipam/vlans`, `ipam/prefixes?vlan_id=` |
-
-### Curated — write (only when writes enabled)
-| Tool | What it does |
-|---|---|
-| `netbox_allocate_ips` | POST to `available-ips` to atomically reserve N IPs (optional description/assignment) |
-| `netbox_allocate_prefix` | POST to `available-prefixes` to carve a child prefix |
-
-### Generic
-| Tool | Writes? | Notes |
-|---|---|---|
-| `netbox_list_object_types` | no | Lists supported `app.model` keys (from schema) |
-| `netbox_list_objects` | no | `object_type`, `filters` dict, `fields`, `brief`, `ordering`, pagination |
-| `netbox_get_object` | no | By ID |
-| `netbox_create_object` | yes | Accepts single or bulk list |
-| `netbox_update_object` | yes | PATCH semantics |
-| `netbox_delete_object` | yes | Bulk by ID list supported |
-
-### Escape hatches
-| Tool | Writes? | Notes |
-|---|---|---|
-| `netbox_search_spec` | no | Keyword search over the OpenAPI schema (paths, operations, models) |
-| `netbox_get_definition` | no | Full schema for a model or operation (fields, enums, required) |
-| `netbox_api_call` | GET only unless writes enabled | Arbitrary `/api/...` call; method restricted to GET when read-only |
-
-OpenAPI schema is fetched once from `/api/schema/?format=json`, cached in memory (with an optional on-disk cache) and refreshed on demand.
-
-## 5. Cross-cutting behaviour
-
-- **Token efficiency**: use NetBox `brief=true` for nested lookups and `fields=` to trim; strip `url`, `display_url`, empty `custom_fields`/`tags`, etc. Truncate large results with a clear "N more — use offset" hint.
-- **Pagination**: transparent `next`-link following up to the requested limit; never fetch unbounded.
-- **Errors**: map NetBox 400 validation errors into concise, model-actionable messages (field → problem); 401/403 → token/permission hints; 404 → "not found, try netbox_search"; network/TLS errors → a hint about `NETBOX_VERIFY_SSL`/`NETBOX_CA_BUNDLE`.
-- **Retries**: limited retry with backoff on 429/502/503/504 and connection errors (GETs only).
-- **Write gating**: write tools are *not registered* when disabled (invisible to the model), and `netbox_api_call` rejects non-GET methods.
-- **Logging**: structured logs to stderr (never stdout — that would corrupt stdio), including caller name (from bearer token), tool, object type and, for writes, the IDs changed.
-- **Health**: `/health` endpoint on HTTP transport (unauthenticated, no NetBox data) for Docker healthcheck; startup check of `/api/status/` that logs the NetBox version.
-
-## 6. Tooling
-
-- **uv** + `pyproject.toml`, Python 3.12+
-- **pytest** + **pytest-asyncio** + **respx** for unit tests (mocked NetBox)
-- **Integration tests** (marked, opt-in) against a live NetBox via `NETBOX_URL`/`NETBOX_TOKEN`; read-only by default, write tests only when a flag is set and only touching objects tagged `mcp-test`
-- **ruff** (lint + format), **mypy** (strict on `src/`)
-- **pre-commit** hooks; GitHub Actions CI (lint, type check, unit tests, Docker build) — added once a remote exists
-
-## 7. Deployment
-
-- **Local (Claude Code)**: `uv run netbox-mcp` with stdio; registered via `claude mcp add netbox -- uv --directory /home/reptar/Netbox-MCP run netbox-mcp` and env vars.
-- **Docker (Claude Desktop)**:
-  - Multi-stage `Dockerfile` (uv builder → slim runtime), non-root user, `HEALTHCHECK` on `/health`.
-  - `docker-compose.yml` on the separate Docker host, `env_file: .env`, optional CA bundle mounted read-only, `MCP_TRANSPORT=http`.
-  - Claude Desktop connects to `http(s)://<docker-host>:8000/mcp` with an `Authorization: Bearer <token>` header (same pattern as your existing servers).
-  - TLS for the MCP endpoint itself: document putting it behind a reverse proxy if it leaves a trusted network; not built into the app.
-
-## 8. Milestones
-
-1. ✅ **Skeleton** — uv project, config, NetBoxClient (auth header detection, HTTP/HTTPS/CA, pagination, errors), stdio server with a `netbox_status` tool. Verify against your 4.7.2 instance.
-2. ✅ **Generic + schema tools** — object-type registry, list/get, `search_spec`, `get_definition`, read-only `api_call`. Unit tests.
-3. ✅ **Curated reads** — search, IP/MAC lookup, device/interface summary, cable trace, IPAM helpers, VLAN lookup. Unit + integration tests.
-4. ✅ **Writes** — env-gated generic create/update/delete, allocate IPs/prefix, `api_call` write methods.
-5. ✅ **HTTP + auth + Docker** — Streamable HTTP, bearer verifier with named tokens, `/health`, Dockerfile, compose, README with Claude Code & Desktop setup.
-6. **Hardening** — eval questions (10 realistic NetBox Q&As run through Claude), output-size tuning, CI.
-7. **Later: CML** — NetBox as source of truth for CML labs (design TBD).
-
-## 9. Open items to confirm during build
-
-- FastMCP version at build time and its current bearer-token verifier API (custom `TokenVerifier` vs built-in static verifier).
-- Whether your NetBox service token is v1 or v2 (`nbt_` prefix) — handled either way.
-- A NetBox user/token permission set for the service account: read-all now; write permissions only when you enable writes.
+| CI (lint, types, tests, Docker build) + publish the image to GHCR | Catches regressions on every PR; the VPS can pull an image instead of cloning a private repo and building |
+| Per-token roles (`name:ro:…` / `name:rw:…`) | Share the hosted server without giving everyone write access |
+| Write preview (`confirm=true` to apply) | Show the exact change before applying it on shared servers |
+| Multiple NetBox instances in one server | One endpoint for the home NetBox and the VPS NetBox |
+| Prometheus metrics, rate limiting | Operations visibility and protection for shared servers |
+| MCP prompts (e.g. "audit site", "add access switch") | Ready-made workflows in clients that support prompts |
+| OAuth sign-in | A fallback if a client can't send bearer headers |
