@@ -8,6 +8,7 @@ Everything created is tagged `mcp-test`. Safe to re-run: existing objects are re
 Topology (site "MCP Lab", location "DC1" with racks R1/R2, VRF "LAB"):
 
     lab-rtr1 Gi2 ──────────── Gi1/0/1 lab-sw1 Gi1/0/3 ── FP1 lab-pp1 RP1 ══ RP1 lab-pp2 FP1 ── Gi1/0/3 lab-sw2
+    lab-rtr1 Gi4 ── circuit MCP-CID-001 (A: MCP Lab) ── (Z: provider network "MCP Telco Backbone")
     lab-rtr1 Gi3 ──────────────────────────────────────────────────────────────────────────── Gi1/0/1 lab-sw2
                                lab-sw1 Po1 (Gi1/0/4) ─────────────────────────────── (Gi1/0/4) Po1 lab-sw2
 """
@@ -262,6 +263,44 @@ class Seeder:
         await cable((RP, pp["lab-pp1"]["rp"]["id"]), (RP, pp["lab-pp2"]["rp"]["id"]), "MCP-005")
         await cable((FP, pp["lab-pp2"]["fp"]["id"]), (IF, sw["lab-sw2"]["Gi1/0/3"]["id"]), "MCP-006")
 
+        # --- A provider circuit: lab-rtr1 Gi4 -> circuit A side (site) ... Z side (provider network) ---
+        provider = await self.ensure("circuits/providers/", {"slug": "mcp-telco"}, {"name": "MCP Telco"})
+        ctype = await self.ensure("circuits/circuit-types/", {"slug": "internet"}, {"name": "Internet"})
+        backbone = await self.ensure(
+            "circuits/provider-networks/",
+            {"name": "MCP Telco Backbone", "provider_id": provider["id"]},
+            {"provider": provider["id"]},
+        )
+        circuit = await self.ensure(
+            "circuits/circuits/",
+            {"cid": "MCP-CID-001"},
+            {"provider": provider["id"], "type": ctype["id"], "status": "active", "commit_rate": 100000},
+        )
+        term_a = await self.ensure(
+            "circuits/circuit-terminations/",
+            {"circuit_id": circuit["id"], "term_side": "A"},
+            {
+                "circuit": circuit["id"],
+                "termination_type": "dcim.site",
+                "termination_id": site["id"],
+                "port_speed": 1000000,
+                "xconnect_id": "XC-0001",
+            },
+        )
+        await self.ensure(
+            "circuits/circuit-terminations/",
+            {"circuit_id": circuit["id"], "term_side": "Z"},
+            {
+                "circuit": circuit["id"],
+                "termination_type": "circuits.providernetwork",
+                "termination_id": backbone["id"],
+            },
+        )
+        r_gi4 = await iface(
+            "lab-rtr1", "GigabitEthernet4", "1000base-t", description="Internet uplink (MCP-CID-001)"
+        )
+        await cable((IF, r_gi4["id"]), ("circuits.circuittermination", term_a["id"]), "MCP-007")
+
         # --- IP addresses, MACs, primary IPs ---
         async def ip(address: str, iface_obj: dict[str, Any], **extra: Any) -> dict[str, Any]:
             return await self.ensure(
@@ -310,6 +349,11 @@ class Seeder:
             "dcim/rear-ports/",
             "dcim/interfaces/",
             "dcim/devices/",
+            "circuits/circuit-terminations/",
+            "circuits/circuits/",
+            "circuits/provider-networks/",
+            "circuits/circuit-types/",
+            "circuits/providers/",
             "dcim/rack-reservations/",
             "dcim/racks/",
             "dcim/locations/",

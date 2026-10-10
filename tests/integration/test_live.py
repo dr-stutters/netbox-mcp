@@ -114,3 +114,24 @@ async def test_rack_elevation_and_space(client: Client[Any]) -> None:
     space = await call(client, "netbox_find_rack_space", units=19, site="mcp-lab")
     by_rack = {r["rack"]: r for r in space["results"]}
     assert by_rack["R2"]["fits_at_position"] == [1]  # the reservation at U20-21 blocks anything higher
+
+
+async def test_trace_through_circuit(client: Client[Any]) -> None:
+    out = await call(client, "netbox_trace_cable", device="lab-rtr1", port="Gi4")
+    assert out["complete"] is True
+    assert out["far_end"] == "MCP Telco Backbone (provider-network)"
+
+
+async def test_paths_through_patch_panel(client: Client[Any]) -> None:
+    out = await call(client, "netbox_trace_cable", device="lab-pp1", port="RP1", port_type="rear-port")
+    assert out["path_count"] == 1
+    assert out["paths"][0]["endpoints"] == (
+        "lab-sw1 GigabitEthernet1/0/3 (interface) <-> lab-sw2 GigabitEthernet1/0/3 (interface)"
+    )
+
+
+async def test_whats_connected(client: Client[Any]) -> None:
+    out = await call(client, "netbox_whats_connected", device="lab-sw1", interface="Gi1/0/3")
+    assert out["direct_peer"] == "lab-pp1 FP1 (front-port)"
+    assert out["far_end"][0]["device"] == "lab-sw2"
+    assert out["far_end"][0]["rack"] == "R2"
