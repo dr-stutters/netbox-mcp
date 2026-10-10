@@ -6,7 +6,7 @@ language and the model uses NetBox's API for you:
 
 > *"Where is 10.99.99.11?"* · *"Summarise lab-sw1"* · *"Trace the cable from lab-sw1 Gi1/0/3"* ·
 > *"What's on VLAN 10?"* · *"What changed on lab-sw1 this week?"* · *"Where can a 2U device go in DC1?"* ·
-> *"Give me the next free /24 in 10.99.0.0/16 and reserve it for the lab"*
+> *"What's wrong with the data at site X?"* · *"Give me the next free /24 in 10.99.0.0/16 and reserve it for the lab"*
 
 Built with [FastMCP](https://gofastmcp.com) for **NetBox 4.x** (tested on 4.7).
 
@@ -225,6 +225,7 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 | `netbox_site_summary` | Everything at a site: details, locations, racks with utilisation, devices by role and status, VMs, prefixes, VLANs and circuits |
 | `netbox_rack_elevation` | What's in a rack, unit by unit: devices and faces, reservations, free ranges, utilisation |
 | `netbox_find_rack_space` | Racks with room for a device of N units (respects reservations, full or half depth) |
+| `netbox_data_hygiene` | Finds data problems: duplicate IPs, IPs outside any prefix, nearly full or unused prefixes, devices without a primary IP or serial, rack devices without a position, unused VLANs, trunks without cables, cabled interfaces without descriptions. Optionally per site |
 | `netbox_change_history` | Who changed what and when: filter by object (including its interfaces), user, action and time (`since="7d"`). Updates show only the fields that changed, with references shown by name |
 | `netbox_journal` | Journal notes on an object, or the latest notes across NetBox |
 
