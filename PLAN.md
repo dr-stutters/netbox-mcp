@@ -64,7 +64,7 @@ entry can be added to and read back from a device.
 | `netbox_whats_connected` | interface `connected_endpoints` (+ devices) | Given a device + interface, what's on the far end (the LLDP-style question). Built on the interface's own path data rather than `dcim/connected-device/`, which only handles device endpoints and returns 404 for circuits |
 | `netbox_trace_cable` (extend) | `front-ports/{id}/paths/`, `rear-ports/{id}/paths/`, `circuit-terminations/{id}/paths/` | Trace from patch panel ports and circuit terminations too, listing every path through them |
 
-### 2.4 Data hygiene report
+### 2.4 Data hygiene report ✅
 
 | Tool | API | Notes |
 |---|---|---|

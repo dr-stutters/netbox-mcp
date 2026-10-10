@@ -135,3 +135,10 @@ async def test_whats_connected(client: Client[Any]) -> None:
     assert out["direct_peer"] == "lab-pp1 FP1 (front-port)"
     assert out["far_end"][0]["device"] == "lab-sw2"
     assert out["far_end"][0]["rack"] == "R2"
+
+
+async def test_data_hygiene(client: Client[Any]) -> None:
+    out = await call(client, "netbox_data_hygiene", site="MCP Lab")
+    assert out["checks_run"] == 10
+    unused = out["problems"].get("prefixes_unused", {}).get("examples", [])
+    assert any(u.startswith("10.99.20.0/24") for u in unused)  # SERVERS has no IPs in the seed
