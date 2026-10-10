@@ -1,0 +1,34 @@
+# NetBox MCP server over HTTP (Streamable HTTP at /mcp, liveness at /health).
+#
+#   cp .env.example .env    # set NETBOX_URL, NETBOX_TOKEN, MCP_AUTH_TOKENS (netbox-mcp token <name>)
+#   docker compose up -d --build
+#
+# Settings are read from .env. MCP_PUBLISH_PORT chooses the host port (default 8000).
+services:
+  netbox-mcp:
+    build: .
+    image: netbox-mcp:latest
+    container_name: netbox-mcp
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Fixed inside the container; the host port is set by MCP_PUBLISH_PORT below.
+      MCP_TRANSPORT: http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8000"
+      NETBOX_MCP_CACHE_DIR: /cache
+    ports:
+      - "${MCP_PUBLISH_PORT:-8000}:8000"
+    volumes:
+      - schema-cache:/cache
+    # Hardening: no root, no extra privileges, immutable filesystem.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  schema-cache:

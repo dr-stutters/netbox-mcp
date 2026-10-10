@@ -17,6 +17,45 @@ claude mcp add netbox -s user -- uv --directory /path/to/Netbox-MCP run netbox-m
 
 `uv --directory` runs the server from the project folder, so it picks up `.env`.
 
+## Run as a shared HTTP server (Docker)
+
+The image serves Streamable HTTP at `/mcp` (bearer-token auth) and an unauthenticated liveness
+check at `/health`. It refuses to start in HTTP mode without at least one token.
+
+1. **Configure** — copy `.env.example` to `.env` and set `NETBOX_URL`, `NETBOX_TOKEN` and, if wanted,
+   `NETBOX_MCP_ENABLE_WRITES=true` and `MCP_PUBLISH_PORT`.
+2. **Create a token per person** — each run prints the raw token (give it to that person) and a
+   hashed entry for the server, so `.env` never holds a usable secret:
+
+   ```bash
+   uv run netbox-mcp token alice
+   # or, without a local Python setup:
+   docker compose run --rm --no-deps netbox-mcp netbox-mcp token alice
+   ```
+
+   Add the printed `alice:sha256:...` entries to `MCP_AUTH_TOKENS` (comma-separated). To revoke
+   someone, delete their entry and `docker compose up -d`.
+3. **Start**:
+
+   ```bash
+   docker compose up -d --build
+   docker compose ps        # should show (healthy)
+   docker compose logs -f   # each tool call is logged with the caller's token name
+   ```
+
+4. **Connect a client** to `http://<host>:<MCP_PUBLISH_PORT>/mcp` with the header
+   `Authorization: Bearer <token>`. For Claude Code:
+
+   ```bash
+   claude mcp add --transport http netbox-remote http://<host>:8000/mcp \
+     --header "Authorization: Bearer <token>"
+   ```
+
+**Claude Desktop / claude.ai custom connectors** connect from Anthropic's cloud, not from your
+machine, so the URL must be reachable from the internet over HTTPS. Put the container behind a
+reverse proxy or tunnel that terminates TLS (Caddy, Traefik, nginx, Cloudflare Tunnel, ...) and use
+`https://<public-name>/mcp`. Keep plain HTTP for trusted LAN/VPN use only.
+
 ## Tools
 
 | Tool | Purpose |
