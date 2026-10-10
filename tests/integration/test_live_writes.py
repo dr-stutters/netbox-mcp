@@ -39,6 +39,15 @@ async def call(client: Client[Any], tool: str, **args: Any) -> Any:
     return (await client.call_tool(tool, args)).structured_content
 
 
+async def write(client: Client[Any], tool: str, **args: Any) -> Any:
+    """Preview-first writes: preview, then apply with the returned confirm token."""
+    preview = await call(client, tool, **args)
+    assert preview["status"] == "preview", preview
+    applied = await call(client, tool, **args, confirm=preview["confirm"])
+    assert applied["status"] == "applied", applied
+    return applied
+
+
 async def test_device_lifecycle(client: Client[Any]) -> None:
     sw1 = (await call(client, "netbox_list_objects", object_type="devices", filters={"name": "lab-sw1"}))[
         "results"
@@ -51,24 +60,24 @@ async def test_device_lifecycle(client: Client[Any]) -> None:
         "status": "planned",
         "tags": ["mcp-test"],
     }
-    dev = await call(client, "netbox_create_object", object_type="devices", data=data)
+    dev = (await write(client, "netbox_create_object", object_type="devices", data=data))["created"][0]
     try:
         with pytest.raises(ToolError, match="Unknown field"):
-            await call(
+            await write(
                 client, "netbox_update_object", object_type="devices", id=dev["id"], data={"stauts": "x"}
             )
-        updated = await call(
+        updated = await write(
             client, "netbox_update_object", object_type="devices", id=dev["id"], data={"status": "active"}
         )
-        assert updated["status"] == "active"
+        assert updated["updated"][0]["status"] == "active"
     finally:
-        out = await call(client, "netbox_delete_object", object_type="devices", ids=[dev["id"]])
-        assert out["deleted"][0]["display"] == "lab-it-device"
+        out = await write(client, "netbox_delete_object", object_type="devices", ids=[dev["id"]])
+        assert out["deleted"][0].startswith("lab-it-device")
 
 
 async def test_allocate_and_release_ip(client: Client[Any]) -> None:
     before = await call(client, "netbox_next_available_ips", prefix="10.99.20.0/24")
-    out = await call(
+    out = await write(
         client,
         "netbox_allocate_ips",
         prefix="10.99.20.0/24",
@@ -79,11 +88,11 @@ async def test_allocate_and_release_ip(client: Client[Any]) -> None:
     try:
         assert ip["address"] == before["available"][0]
     finally:
-        await call(client, "netbox_delete_object", object_type="ip-addresses", ids=[ip["id"]])
+        await write(client, "netbox_delete_object", object_type="ip-addresses", ids=[ip["id"]])
 
 
 async def test_journal_round_trip(client: Client[Any]) -> None:
-    added = await call(
+    added = await write(
         client,
         "netbox_add_journal_entry",
         object_type="devices",
@@ -94,7 +103,7 @@ async def test_journal_round_trip(client: Client[Any]) -> None:
         out = await call(client, "netbox_journal", object_type="devices", object="lab-sw1")
         assert any(e["id"] == added["id"] and e["comments"] == "integration test" for e in out["entries"])
     finally:
-        await call(client, "netbox_api_call", path=f"extras/journal-entries/{added['id']}/", method="DELETE")
+        await write(client, "netbox_api_call", path=f"extras/journal-entries/{added['id']}/", method="DELETE")
 
 
 async def test_data_hygiene_finds_planted_problems(client: Client[Any]) -> None:
@@ -102,24 +111,26 @@ async def test_data_hygiene_finds_planted_problems(client: Client[Any]) -> None:
         "results"
     ][0]
     # NetBox enforces unique IPs per VRF by default, so duplicates need a VRF with that turned off.
-    vrf = await call(
+    vrf = await write(
         client,
         "netbox_create_object",
         object_type="vrfs",
         data={"name": "MCP-DUP-TEST", "enforce_unique": False, "tags": ["mcp-test"]},
     )
-    ips = await call(
+    vrf = vrf["created"][0]
+    ips = await write(
         client,
         "netbox_create_object",
         object_type="ip-addresses",
         data=[{"address": "198.51.100.7/24", "vrf": vrf["id"], "tags": ["mcp-test"]}] * 2,
     )
-    trunk = await call(
+    trunk = await write(
         client,
         "netbox_create_object",
         object_type="dcim.interfaces",
         data={"device": sw1["id"], "name": "GigabitEthernet1/0/48", "type": "1000base-t", "mode": "tagged"},
     )
+    trunk = trunk["created"][0]
     try:
         everywhere = await call(
             client, "netbox_data_hygiene", checks=["duplicate_ips", "ips_outside_prefixes"]
@@ -132,18 +143,18 @@ async def test_data_hygiene_finds_planted_problems(client: Client[Any]) -> None:
         site = await call(client, "netbox_data_hygiene", site="MCP Lab", checks=["trunks_without_cable"])
         assert "lab-sw1 GigabitEthernet1/0/48" in site["problems"]["trunks_without_cable"]["examples"]
     finally:
-        await call(
-            client, "netbox_delete_object", object_type="ip-addresses", ids=[i["id"] for i in ips["results"]]
+        await write(
+            client, "netbox_delete_object", object_type="ip-addresses", ids=[i["id"] for i in ips["created"]]
         )
-        await call(client, "netbox_delete_object", object_type="vrfs", ids=[vrf["id"]])
-        await call(client, "netbox_delete_object", object_type="dcim.interfaces", ids=[trunk["id"]])
+        await write(client, "netbox_delete_object", object_type="vrfs", ids=[vrf["id"]])
+        await write(client, "netbox_delete_object", object_type="dcim.interfaces", ids=[trunk["id"]])
 
 
 async def test_allocations_and_connect_cable(client: Client[Any]) -> None:
-    ip = await call(client, "netbox_allocate_ips", ip_range="10.99.20.100", status="dhcp", tags=["mcp-test"])
-    vlan = await call(client, "netbox_allocate_vlans", group="mcp-lab", names=["IT-TEMP"], tags=["mcp-test"])
-    asn = await call(client, "netbox_allocate_asns", asn_range="mcp-lab-asns", tags=["mcp-test"])
-    cable = await call(
+    ip = await write(client, "netbox_allocate_ips", ip_range="10.99.20.100", status="dhcp", tags=["mcp-test"])
+    vlan = await write(client, "netbox_allocate_vlans", group="mcp-lab", names=["IT-TEMP"], tags=["mcp-test"])
+    asn = await write(client, "netbox_allocate_asns", asn_range="mcp-lab-asns", tags=["mcp-test"])
+    cable = await write(
         client,
         "netbox_connect_cable",
         a_device="lab-sw1",
@@ -161,10 +172,12 @@ async def test_allocations_and_connect_cable(client: Client[Any]) -> None:
         peer = await call(client, "netbox_whats_connected", device="lab-sw2", interface="Gi1/0/2")
         assert peer["far_end"][0]["device"] == "lab-sw1"
     finally:
-        await call(client, "netbox_delete_object", object_type="dcim.cables", ids=[cable["cable"]["id"]])
-        await call(client, "netbox_delete_object", object_type="ip-addresses", ids=[ip["allocated"][0]["id"]])
-        await call(client, "netbox_delete_object", object_type="vlans", ids=[vlan["allocated"][0]["id"]])
-        await call(client, "netbox_delete_object", object_type="asns", ids=[asn["allocated"][0]["id"]])
+        await write(client, "netbox_delete_object", object_type="dcim.cables", ids=[cable["cable"]["id"]])
+        await write(
+            client, "netbox_delete_object", object_type="ip-addresses", ids=[ip["allocated"][0]["id"]]
+        )
+        await write(client, "netbox_delete_object", object_type="vlans", ids=[vlan["allocated"][0]["id"]])
+        await write(client, "netbox_delete_object", object_type="asns", ids=[asn["allocated"][0]["id"]])
 
 
 async def test_run_script_dry_run_then_commit(client: Client[Any]) -> None:
@@ -191,23 +204,32 @@ async def test_run_script_dry_run_then_commit(client: Client[Any]) -> None:
     assert after_dry.get("description", "") == original  # rolled back
 
     try:
-        done = await call(
+        done = await write(
             client,
             "netbox_run_script",
             script="SetDescription",
             data={"device": sw2["id"], "new_description": "it-commit"},
             commit=True,
         )
-        assert done["status"] == "completed"
+        assert done["result_status"] == "completed"
         after = await call(
             client, "netbox_get_object", object_type="devices", id=sw2["id"], fields=["description"]
         )
         assert after["description"] == "it-commit"
     finally:
-        await call(
+        await write(
             client,
             "netbox_update_object",
             object_type="devices",
             id=sw2["id"],
             data={"description": original},
         )
+
+
+async def test_blocked_preview_issues_no_token(client: Client[Any]) -> None:
+    hv = (await call(client, "netbox_list_objects", object_type="devices", filters={"name": "lab-hv1"}))[
+        "results"
+    ][0]
+    out = await call(client, "netbox_delete_object", object_type="devices", ids=[hv["id"]])
+    assert out["status"] == "blocked" and "confirm" not in out
+    assert "VM(s) are hosted on it" in out["blockers"][0]

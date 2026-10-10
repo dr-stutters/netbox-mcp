@@ -19,6 +19,7 @@ from netbox_mcp.client import NetBoxClient
 from netbox_mcp.config import Settings
 from netbox_mcp.deps import current_caller
 from netbox_mcp.errors import NetBoxError
+from netbox_mcp.preview import PreviewStore
 from netbox_mcp.schema import SchemaStore
 from netbox_mcp.tools import (
     analysis,
@@ -67,8 +68,12 @@ Writes are ENABLED: netbox_create_object, netbox_update_object, netbox_delete_ob
 netbox_allocate_ips, netbox_allocate_prefix, netbox_allocate_vlans, netbox_allocate_asns,
 netbox_connect_cable, netbox_add_journal_entry, netbox_run_script (commit=true), and non-GET
 netbox_api_call change live data.
-Look objects up first, confirm destructive changes with the user, and prefer the allocate tools
-over picking addresses yourself (they are atomic).
+All of them are PREVIEW-FIRST: a call without `confirm` changes nothing and returns a preview
+(field changes, side effects, exact addresses/VLANs/ASNs) plus a single-use confirm token. Show the
+preview to the user and only after they approve repeat the identical call with confirm=<token>.
+Tokens expire after 10 minutes and are refused if the arguments or the objects changed; then preview
+again. A "blocked" preview lists why the change can't be applied. Prefer the allocate tools over
+picking addresses yourself.
 """
 
 
@@ -104,7 +109,11 @@ def create_server(settings: Settings, *, auth: AuthProvider | None = None) -> Fa
             # Don't refuse to start: the model can still call netbox_status to see the error.
             log.error("NetBox startup check failed: %s", e)
         try:
-            yield {"netbox": client, "schema": SchemaStore(client, settings.netbox_mcp_cache_dir)}
+            yield {
+                "netbox": client,
+                "schema": SchemaStore(client, settings.netbox_mcp_cache_dir),
+                "previews": PreviewStore(),
+            }
         finally:
             await client.aclose()
 

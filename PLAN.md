@@ -133,7 +133,7 @@ entry can be added to and read back from a device.
 |---|---|
 | CI (lint, types, tests, Docker build) + publish the image to GHCR | Catches regressions on every PR; the VPS can pull an image instead of cloning a private repo and building |
 | Per-token roles (`name:ro:…` / `name:rw:…`) | Share the hosted server without giving everyone write access |
-| Write preview (`confirm=true` to apply) | Show the exact change before applying it on shared servers |
+| ✅ Write preview (single-use confirm tokens) | Every write previews the exact change first; applying needs the preview's token |
 | Multiple NetBox instances in one server | One endpoint for the home NetBox and the VPS NetBox |
 | Prometheus metrics, rate limiting | Operations visibility and protection for shared servers |
 | MCP prompts (e.g. "audit site", "add access switch") | Ready-made workflows in clients that support prompts |

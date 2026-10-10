@@ -6,6 +6,7 @@ from fastmcp import Context
 from fastmcp.server.dependencies import get_access_token
 
 from netbox_mcp.client import NetBoxClient
+from netbox_mcp.preview import PreviewStore
 from netbox_mcp.schema import SchemaIndex, SchemaStore
 
 
@@ -23,3 +24,8 @@ def current_caller() -> str:
     """Token name of the HTTP caller, or 'local' for stdio/unauthenticated use."""
     token = get_access_token()
     return token.client_id if token is not None else "local"
+
+
+def get_previews(ctx: Context) -> PreviewStore:
+    store: PreviewStore = ctx.lifespan_context["previews"]
+    return store

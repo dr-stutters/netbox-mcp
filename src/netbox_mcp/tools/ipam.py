@@ -63,6 +63,21 @@ def covered_addresses(prefixes: list[str]) -> int:
     )
 
 
+def next_child_prefixes(
+    free: list[ipaddress.IPv4Network | ipaddress.IPv6Network], prefix_length: int, count: int
+) -> list[str]:
+    """The first `count` child prefixes of `prefix_length` that fit in the free blocks, in order."""
+    found: list[str] = []
+    for block in free:
+        if block.prefixlen > prefix_length:
+            continue
+        for sub in block.subnets(new_prefix=prefix_length):
+            found.append(str(sub))
+            if len(found) >= count:
+                return found
+    return found
+
+
 def register(mcp: FastMCP, settings: Settings) -> None:
     @mcp.tool(annotations=READ_ONLY)
     async def netbox_prefix_utilization(
@@ -190,16 +205,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             return out
         if prefix_length < parent.prefixlen or prefix_length > parent.max_prefixlen:
             raise InvalidRequest(f"/{prefix_length} cannot fit inside {parent}.")
-        found: list[str] = []
-        for block in free:
-            if block.prefixlen > prefix_length:
-                continue
-            for sub in block.subnets(new_prefix=prefix_length):
-                found.append(str(sub))
-                if len(found) >= count:
-                    break
-            if len(found) >= count:
-                break
+        found = next_child_prefixes(free, prefix_length, count)
         out["available"] = found
         if len(found) < count:
             out["note"] = f"Only {len(found)} free /{prefix_length} block(s) available."

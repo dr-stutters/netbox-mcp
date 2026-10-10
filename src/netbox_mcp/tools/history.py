@@ -14,9 +14,10 @@ from pydantic import Field
 
 from netbox_mcp.client import NetBoxClient
 from netbox_mcp.config import Settings
-from netbox_mcp.deps import current_caller, get_netbox, get_schema
+from netbox_mcp.deps import current_caller, get_netbox, get_previews, get_schema
 from netbox_mcp.errors import InvalidRequest, NetBoxError
 from netbox_mcp.formatting import compact
+from netbox_mcp.preview import Plan, preview_or_apply
 from netbox_mcp.schema import ObjectType, SchemaIndex
 from netbox_mcp.tools.common import choice, content_type, label, resolve_object
 
@@ -304,26 +305,48 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         ],
         comments: Annotated[str, Field(description="The note (Markdown supported).", min_length=1)],
         kind: Literal["info", "success", "warning", "danger"] = "info",
+        confirm: Annotated[
+            str | None,
+            Field(
+                description="Omit to preview. To apply, repeat the call with the same arguments "
+                "plus confirm=<token>."
+            ),
+        ] = None,
     ) -> dict[str, Any]:
-        """Add a journal entry (a dated note, e.g. 'replaced PSU') to any NetBox object."""
+        """Add a journal entry (a dated note, e.g. 'replaced PSU') to any NetBox object (preview first)."""
+        args = {"object_type": object_type, "object": object, "comments": comments, "kind": kind}
         nb = get_netbox(ctx)
         otype = (await get_schema(ctx)).resolve_type(object_type)
         obj = await resolve_object(nb, otype, object)
         ct = content_type(otype)
-        entry = await nb.request(
-            "POST",
-            "extras/journal-entries/",
-            json={
-                "assigned_object_type": ct,
-                "assigned_object_id": obj["id"],
-                "kind": kind,
-                "comments": comments,
-            },
+        plan = Plan(
+            summary=f"Add a {kind} journal entry to {ct} {label(obj)}",
+            details={"object": f"{ct} {label(obj)} (id {obj['id']})", "kind": kind, "comments": comments},
+            fingerprint=obj["id"],
         )
-        audit.info("caller=%s journal %s id=%s entry=%s", current_caller(), ct, obj["id"], entry.get("id"))
-        return {
-            "id": entry["id"],
-            "object": f"{ct} {label(obj)}",
-            "kind": kind,
-            "created": entry.get("created"),
-        }
+
+        async def apply() -> dict[str, Any]:
+            entry = await nb.request(
+                "POST",
+                "extras/journal-entries/",
+                json={
+                    "assigned_object_type": ct,
+                    "assigned_object_id": obj["id"],
+                    "kind": kind,
+                    "comments": comments,
+                },
+            )
+            audit.info(
+                "caller=%s journal %s id=%s entry=%s", current_caller(), ct, obj["id"], entry.get("id")
+            )
+            return {"id": entry["id"], "created": entry.get("created")}
+
+        return await preview_or_apply(
+            get_previews(ctx),
+            tool="netbox_add_journal_entry",
+            args=args,
+            confirm=confirm,
+            caller=current_caller(),
+            plan=plan,
+            apply=apply,
+        )

@@ -3,6 +3,8 @@
 # No `from __future__ import annotations`: tool signatures reference locals (method_desc),
 # which FastMCP must be able to resolve when it inspects them.
 
+import json
+import logging
 import re
 from typing import Annotated, Any, Literal
 
@@ -11,15 +13,56 @@ from fastmcp.tools import ToolResult
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from netbox_mcp.client import NetBoxClient
 from netbox_mcp.config import Settings
-from netbox_mcp.deps import get_netbox, get_schema
+from netbox_mcp.deps import current_caller, get_netbox, get_previews, get_schema
 from netbox_mcp.errors import InvalidRequest
+from netbox_mcp.formatting import compact as _compact
 from netbox_mcp.formatting import list_result, object_result
+from netbox_mcp.preview import Plan, preview_or_apply
+from netbox_mcp.schema import SchemaIndex
+from netbox_mcp.tools.common import label
+from netbox_mcp.tools.writes import delete_effects, field_changes
+
+audit = logging.getLogger("netbox_mcp.audit")
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)
 
 # Relative API path: letters, digits, '-', '_', '/', '.'; no '..' segments or query strings.
 _PATH_RE = re.compile(r"^/?(api/)?[A-Za-z0-9_\-/.]+$")
+
+
+_DETAIL_RE = re.compile(r"^/?(?:api/)?(?P<base>[a-z-]+/[a-z0-9-]+/)(?P<id>\d+)/$")
+
+
+async def _write_plan(
+    nb: NetBoxClient, schema: SchemaIndex, method: str, path: str, params: Any, body: Any
+) -> Plan:
+    """Preview a raw write: the request itself, plus for PATCH/PUT/DELETE on one object its current
+    state, the field changes, or the known side effects of deleting it."""
+    details: dict[str, Any] = {"method": method, "path": f"/api/{path.lstrip('/')}"}
+    if params:
+        details["params"] = params
+    if body is not None:
+        details["body"] = body
+    fingerprint: Any = None
+    m = _DETAIL_RE.match(path)
+    if m and method in ("PATCH", "PUT", "DELETE"):
+        current = await nb.get_object(path)
+        fingerprint = [current.get("id"), current.get("last_updated")]
+        details["object"] = f"{label(current)} (id {current.get('id')})"
+        otype = next((t for t in schema.types.values() if t.path == m.group("base")), None)
+        if method == "DELETE" and otype is not None:
+            effects, blockers = await delete_effects(nb, otype, [current])
+            if effects:
+                details["side_effects"] = effects
+            return Plan(f"DELETE {details['object']}", details, fingerprint, blockers)
+        if isinstance(body, dict):
+            changes, unchanged = field_changes(current, body)
+            details["changes"] = changes
+            if unchanged:
+                details["unchanged"] = unchanged
+    return Plan(f"{method} /api/{path.lstrip('/')}", details, fingerprint)
 
 
 def register(mcp: FastMCP, settings: Settings) -> None:
@@ -78,9 +121,14 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         compact: Annotated[
             bool, Field(description="Trim the response (drop urls/empty fields, shrink nested objects).")
         ] = True,
+        confirm: Annotated[
+            str | None,
+            Field(description="Non-GET only: omit to preview; repeat with confirm=<token> to apply."),
+        ] = None,
     ) -> ToolResult:
         """Call any NetBox REST endpoint directly. Prefer the dedicated tools; use this for
-        endpoints they don't cover (find them with netbox_search_spec)."""
+        endpoints they don't cover (find them with netbox_search_spec). Non-GET calls are preview-first:
+        the first call shows what would happen and returns a confirm token."""
         if method != "GET" and not writes:
             raise InvalidRequest(
                 "This server is read-only: only GET is allowed. "
@@ -92,8 +140,33 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             )
         if not path.endswith("/"):
             path += "/"
+        nb = get_netbox(ctx)
 
-        result = await get_netbox(ctx).request(method, path, params=params, json=body)
+        if method != "GET":
+            args = {"path": path, "method": method, "params": params, "body": body}
+            plan = await _write_plan(nb, await get_schema(ctx), method, path, params, body)
+
+            async def apply() -> dict[str, Any]:
+                response = await nb.request(method, path, params=params, json=body)
+                audit.info("caller=%s api_call %s /api/%s", current_caller(), method, path.lstrip("/"))
+                if response is None:
+                    return {"response": "no content"}
+                return {"response": _compact(response) if compact else response}
+
+            out = await preview_or_apply(
+                get_previews(ctx),
+                tool="netbox_api_call",
+                args=args,
+                confirm=confirm,
+                caller=current_caller(),
+                plan=plan,
+                apply=apply,
+            )
+            return ToolResult(
+                content=json.dumps(out, separators=(",", ":"), default=str), structured_content=out
+            )
+
+        result = await nb.request(method, path, params=params, json=body)
         if result is None:
             return ToolResult(content=f"{method} /api/{path.lstrip('/')} succeeded (no content).")
         if isinstance(result, dict) and "results" in result and "count" in result:
