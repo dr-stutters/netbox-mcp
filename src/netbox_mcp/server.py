@@ -6,12 +6,18 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-import httpx
+import mcp.types as mt
 from fastmcp import FastMCP
+from fastmcp.server.auth import AuthProvider
 from fastmcp.server.lifespan import lifespan
+from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
+from fastmcp.tools import ToolResult
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from netbox_mcp.client import NetBoxClient
 from netbox_mcp.config import Settings
+from netbox_mcp.deps import current_caller
 from netbox_mcp.errors import NetBoxError
 from netbox_mcp.schema import SchemaStore
 from netbox_mcp.tools import cabling, devices, generic, ipam, search, spec, system, writes
@@ -39,8 +45,20 @@ over picking addresses yourself (they are atomic).
 """
 
 
-def create_server(settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None) -> FastMCP:
-    """Build the server. `transport` lets tests inject a mocked httpx transport."""
+class CallLogger(Middleware):
+    """Log every tool call with the caller's token name, so multi-user servers have an audit trail."""
+
+    async def on_call_tool(
+        self,
+        context: MiddlewareContext[mt.CallToolRequestParams],
+        call_next: CallNext[mt.CallToolRequestParams, ToolResult],
+    ) -> ToolResult:
+        log.info("tool=%s caller=%s", context.message.name, current_caller())
+        return await call_next(context)
+
+
+def create_server(settings: Settings, *, auth: AuthProvider | None = None) -> FastMCP:
+    """Build the server. `auth` protects the HTTP transport (stdio is always local and unauthenticated)."""
 
     @lifespan
     async def netbox_lifespan(server: FastMCP[Any]) -> AsyncIterator[dict[str, Any]]:
@@ -49,7 +67,6 @@ def create_server(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
             settings.netbox_token.get_secret_value(),
             verify=settings.verify,
             timeout=settings.netbox_timeout,
-            transport=transport,
         )
         if settings.netbox_url.startswith("http://"):
             log.warning("NETBOX_URL uses plain HTTP; the API token is sent unencrypted")
@@ -70,7 +87,14 @@ def create_server(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
         instructions=instructions,
         lifespan=netbox_lifespan,
         mask_error_details=False,
+        auth=auth,
+        middleware=[CallLogger()],
     )
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health(request: Request) -> JSONResponse:
+        """Liveness check for Docker/load balancers. Unauthenticated, so it reveals nothing about NetBox."""
+        return JSONResponse({"status": "ok"})
 
     for module in (system, search, devices, cabling, ipam, generic, spec, writes):
         module.register(mcp, settings)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastmcp import Context
+from fastmcp.server.dependencies import get_access_token
 
 from netbox_mcp.client import NetBoxClient
 from netbox_mcp.schema import SchemaIndex, SchemaStore
@@ -16,3 +17,9 @@ def get_netbox(ctx: Context) -> NetBoxClient:
 async def get_schema(ctx: Context) -> SchemaIndex:
     store: SchemaStore = ctx.lifespan_context["schema"]
     return await store.get()
+
+
+def current_caller() -> str:
+    """Token name of the HTTP caller, or 'local' for stdio/unauthenticated use."""
+    token = get_access_token()
+    return token.client_id if token is not None else "local"

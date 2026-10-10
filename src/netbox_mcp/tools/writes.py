@@ -16,7 +16,7 @@ from pydantic import Field
 
 from netbox_mcp.client import NetBoxClient
 from netbox_mcp.config import Settings
-from netbox_mcp.deps import get_netbox, get_schema
+from netbox_mcp.deps import current_caller, get_netbox, get_schema
 from netbox_mcp.errors import InvalidRequest
 from netbox_mcp.formatting import compact, list_result, object_result
 from netbox_mcp.schema import ObjectType
@@ -100,7 +100,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         body: Any = [_normalise(i) for i in items] if isinstance(data, list) else _normalise(data)
 
         result = await get_netbox(ctx).request("POST", otype.path, json=body)
-        audit.info("create %s ids=%s", otype.key, _ids(result))
+        audit.info("caller=%s create %s ids=%s", current_caller(), otype.key, _ids(result))
         if isinstance(result, list):
             return list_result(result, count=len(result), offset=0, extra={"created": len(result)})
         return object_result(result)
@@ -132,7 +132,9 @@ def register(mcp: FastMCP, settings: Settings) -> None:
 
         if id is not None:
             result = await nb.request("PATCH", f"{otype.path}{id}/", json=changes)
-            audit.info("update %s ids=[%s] fields=%s", otype.key, id, sorted(data))
+            audit.info(
+                "caller=%s update %s ids=[%s] fields=%s", current_caller(), otype.key, id, sorted(data)
+            )
             return object_result(result)
 
         target = sorted(set(ids or []))
@@ -140,7 +142,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             raise InvalidRequest(f"Provide between 1 and {MAX_BULK} ids.")
         await _existing(nb, otype, target)
         result = await nb.request("PATCH", otype.path, json=[{"id": i, **changes} for i in target])
-        audit.info("update %s ids=%s fields=%s", otype.key, target, sorted(data))
+        audit.info("caller=%s update %s ids=%s fields=%s", current_caller(), otype.key, target, sorted(data))
         return list_result(result, count=len(result), offset=0, extra={"updated": len(result)})
 
     @mcp.tool(annotations=DELETE)
@@ -159,7 +161,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
         nb = get_netbox(ctx)
         found = await _existing(nb, otype, target)
         await nb.request("DELETE", otype.path, json=[{"id": i} for i in target])
-        audit.info("delete %s ids=%s", otype.key, target)
+        audit.info("caller=%s delete %s ids=%s", current_caller(), otype.key, target)
         return {"object_type": otype.key, "deleted": [{"id": o["id"], "display": label(o)} for o in found]}
 
     # --- IPAM allocation ---------------------------------------------------------------
@@ -221,7 +223,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             "POST", f"ipam/prefixes/{p['id']}/available-ips/", json=[_normalise(item) for _ in range(count)]
         )
         created = created if isinstance(created, list) else [created]
-        audit.info("allocate ip prefix=%s ids=%s", p["prefix"], _ids(created))
+        audit.info("caller=%s allocate ip prefix=%s ids=%s", current_caller(), p["prefix"], _ids(created))
 
         out: dict[str, Any] = {
             "prefix": p["prefix"],
@@ -235,7 +237,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             field = "primary_ip4" if ipaddress.ip_interface(ip["address"]).version == 4 else "primary_ip6"
             path = "dcim/devices/" if host_kind == "device" else "virtualization/virtual-machines/"
             await nb.request("PATCH", f"{path}{host_id}/", json={field: ip["id"]})
-            audit.info("set %s %s=%s", host_kind, field, ip["id"])
+            audit.info("caller=%s set %s %s=%s", current_caller(), host_kind, field, ip["id"])
             out["primary_set"] = f"{field} of {device}"
         if device:
             out["assigned_to"] = f"{device} {interface}"
@@ -277,7 +279,7 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             json=[_normalise(item) for _ in range(count)],
         )
         created = created if isinstance(created, list) else [created]
-        audit.info("allocate prefix parent=%s ids=%s", p["prefix"], _ids(created))
+        audit.info("caller=%s allocate prefix parent=%s ids=%s", current_caller(), p["prefix"], _ids(created))
         return {
             "parent": p["prefix"],
             "allocated": [

@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     mcp_transport: Literal["stdio", "http"] = "stdio"
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8000
+    mcp_path: str = "/mcp"
+    # Bearer tokens for HTTP: "name:token" or "name:sha256:<hex>" entries, comma/newline separated.
+    mcp_auth_tokens: SecretStr | None = None
+    # Same format, one entry per line, read from a file (e.g. a Docker secret).
+    mcp_auth_tokens_file: Path | None = None
 
     log_level: str = "INFO"
 
@@ -59,6 +64,15 @@ class Settings(BaseSettings):
         if not raw:
             raise ValueError("NETBOX_TOKEN is empty")
         return SecretStr(raw)
+
+    def auth_token_hashes(self) -> dict[str, str]:
+        """All configured HTTP tokens as {name: sha256_hex}; raises ValueError if malformed."""
+        from netbox_mcp.auth import parse_tokens
+
+        spec = self.mcp_auth_tokens.get_secret_value() if self.mcp_auth_tokens else ""
+        if self.mcp_auth_tokens_file is not None:
+            spec += "\n" + self.mcp_auth_tokens_file.read_text()
+        return parse_tokens(spec)
 
     @property
     def verify(self) -> bool | str:
