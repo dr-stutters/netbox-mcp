@@ -5,22 +5,28 @@ An [MCP](https://modelcontextprotocol.io) server that lets Claude, or any MCP cl
 language and the model uses NetBox's API for you:
 
 > *"Where is 10.99.99.11?"* · *"Summarise lab-sw1"* · *"Trace the cable from lab-sw1 Gi1/0/3"* ·
-> *"What's on VLAN 10?"* · *"What changed on lab-sw1 this week?"* · *"Where can a 2U device go in DC1?"* ·
-> *"What's wrong with the data at site X?"* · *"Give me the next free /24 in 10.99.0.0/16 and reserve it for the lab"*
+> *"What breaks if lab-sw1 goes down?"* · *"Draw the topology of site MCP Lab"* ·
+> *"What changed on lab-sw1 this week?"* · *"Where can a 2U device go in DC1?"* ·
+> *"What's wrong with the data at site X?"* · *"Reserve the next free /24 in 10.99.0.0/16 for the lab"*
 
 Built with [FastMCP](https://gofastmcp.com) for **NetBox 4.x** (tested on 4.7).
 
 ## Features
 
-- **Task-shaped tools**: IP and MAC lookup, device and interface summaries, end-to-end cable traces
-  through patch panels, prefix utilisation, next free IPs and prefixes, and VLAN usage.
-- **Works with every object type**: generic list, get, create, update and delete for all of
-  NetBox's ~140 object types, plus tools that let the model explore NetBox's own API schema.
-- **Catches silent mistakes**: NetBox ignores misspelled filter and field names, which can return
-  every object or quietly drop data. This server checks them against the schema first and replies
-  with "did you mean …?".
-- **Read-only by default**: write tools exist only when you turn them on.
-- **Small responses**: compact JSON with empty fields and links removed, to save the model's context.
+- **55 tools** (45 read-only, 10 that change data), from quick lookups to full analyses:
+  IP/MAC lookup, device and site summaries, cable and power tracing, rack space, IPAM allocation,
+  circuits, VPNs, wireless, clusters, services, tenants and contacts, change history, topology
+  diagrams, impact analysis, data-quality reports, config rendering, scripts, exports and GraphQL.
+- **Works with every object type**: generic list/get/create/update/delete for all of NetBox's ~140
+  object types, plus tools that let the model explore NetBox's own API schema.
+- **Catches silent mistakes**: NetBox ignores misspelled filter and field names (and unsupported
+  custom-field lookups), which can return every object or quietly drop data. The server checks
+  them first and replies with "did you mean …?".
+- **Safe changes**: read-only by default. When writes are enabled, every change is
+  **preview-first**: the model sees exactly what would change (field diffs, side effects, the exact
+  IPs/VLANs to be allocated) and needs a single-use confirm token to apply it.
+- **Readable, compact output**: references shown by name, empty fields dropped, Wi-Fi PSKs and VPN
+  keys masked.
 - **Runs two ways**: locally over stdio (Claude Code), or as a shared HTTP service in Docker with
   per-person bearer tokens and a log of who called what.
 
@@ -36,6 +42,7 @@ Built with [FastMCP](https://gofastmcp.com) for **NetBox 4.x** (tested on 4.7).
 - [Security notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+- [Status and roadmap](#status-and-roadmap)
 
 ## Requirements
 
@@ -208,46 +215,85 @@ All settings are environment variables. They can go in `.env`, or in Docker as `
 
 ### Everyday tasks
 
+**Search and lookup**
+
 | Tool | What it does |
 |---|---|
 | `netbox_status` | Connection check: NetBox version, API user, whether writes are enabled |
 | `netbox_search` | Search devices, VMs, interfaces, IPs, prefixes, VLANs, sites, racks, cables, circuits… at once |
 | `netbox_lookup_ip` | IP → its device or VM and interface, containing prefixes, VLAN and VRF. Works even if the IP isn't recorded |
 | `netbox_lookup_mac` | MAC in any format → its interface, device or VM, and IPs |
+
+**Devices, cabling and power**
+
+| Tool | What it does |
+|---|---|
 | `netbox_device_summary` | Device or VM overview: every interface with its IPs, VLANs, LAG, MAC, cable and far-end peer |
 | `netbox_interface_detail` | One interface in depth. Short names like `Gi1/0/1` or `Po1` work |
 | `netbox_whats_connected` | What's plugged into an interface: the far-end device (through patch panels) with its role, rack position and primary IP, or the circuit/provider network |
 | `netbox_trace_cable` | Full cable path through patch panels and circuits, and whether it's complete. Also traces from patch-panel front/rear ports and circuit terminations (by circuit ID), listing every path through them |
+| `netbox_power_trace` | A device's power chain: PSU → PDU outlet → PDU inlet → feed → panel, plus the rack's power budget |
+
+**Sites and racks**
+
+| Tool | What it does |
+|---|---|
+| `netbox_site_summary` | Everything at a site: details, locations, racks with utilisation, devices by role and status, VMs, prefixes, VLANs and circuits |
+| `netbox_rack_elevation` | What's in a rack, unit by unit: devices and faces, reservations, free ranges, utilisation |
+| `netbox_find_rack_space` | Racks with room for a device of N units (respects reservations, full or half depth) |
+
+**IPAM**
+
+| Tool | What it does |
+|---|---|
 | `netbox_prefix_utilization` | Utilisation, using NetBox's own rules, plus child prefixes and the first free IP or free blocks |
 | `netbox_next_available_ips` | Preview the next free IPs in a prefix or an IP range (by any address inside it, or `start-end`) |
 | `netbox_next_available_prefixes` | Preview free blocks, or the next N child prefixes of a given size |
 | `netbox_next_available_vlans` | Preview the next free VLAN IDs in a VLAN group |
 | `netbox_next_available_asns` | Preview the next free AS numbers in an ASN range |
 | `netbox_vlan_lookup` | VLAN by ID or name, with its prefixes and the tagged and untagged interfaces carrying it |
-| `netbox_site_summary` | Everything at a site: details, locations, racks with utilisation, devices by role and status, VMs, prefixes, VLANs and circuits |
-| `netbox_rack_elevation` | What's in a rack, unit by unit: devices and faces, reservations, free ranges, utilisation |
-| `netbox_find_rack_space` | Racks with room for a device of N units (respects reservations, full or half depth) |
-| `netbox_data_hygiene` | Finds data problems: duplicate IPs, IPs outside any prefix, nearly full or unused prefixes, devices without a primary IP or serial, rack devices without a position, unused VLANs, trunks without cables, cabled interfaces without descriptions. Optionally per site |
-| `netbox_render_config` | A device's or VM's intended config, rendered from its config template with its config context |
-| `netbox_config_context` | A device's or VM's merged config context, and which contexts contributed (in merge order, with what they matched on) |
-| `netbox_custom_fields` | Which custom fields exist, their types, choices and object types, and how to filter on them |
+
+**Circuits, VPN and wireless**
+
+| Tool | What it does |
+|---|---|
 | `netbox_circuit_summary` | A circuit end to end: provider, type, commit rate, and each side's termination, cross-connect and the device/interface cabled to it |
 | `netbox_tunnel_summary` | A VPN tunnel's endpoints (interface, role, outside IP) and IPsec profile with IKE/IPsec proposals; or list all tunnels |
 | `netbox_l2vpn_summary` | An L2VPN (by name, slug or identifier/VNI) with its VLAN, interface and VM-interface members; or list all |
 | `netbox_wireless_lookup` | SSIDs with VLAN, security type and the APs serving them |
-| `netbox_power_trace` | A device's power chain: PSU → PDU outlet → PDU inlet → feed → panel, plus the rack's power budget |
+
+**Virtualization, services and tenancy**
+
+| Tool | What it does |
+|---|---|
 | `netbox_cluster_summary` | A virtualization cluster: hosts, VMs by status and per host, allocated vCPU/memory/disk; or list all clusters |
 | `netbox_service_lookup` | What listens on a port, or what runs on a host: protocol, ports, host and IPs |
 | `netbox_tenant_summary` | Everything a tenant owns (counts and examples per type) and its contacts |
 | `netbox_contacts_for` | Who to contact about an object (role, priority, email, phone), including contacts inherited from its site and tenant |
+
+**Analysis**
+
+| Tool | What it does |
+|---|---|
 | `netbox_topology` | Who connects to whom around a device (N hops) or across a site, through patch panels, as a Mermaid diagram plus edge list |
 | `netbox_impact_analysis` | What breaks if a device goes down: single-homed neighbours, hosted VMs, circuits, tunnels, gateway subnets without FHRP, devices losing power, services |
 | `netbox_compare` | Field-by-field differences between two objects; for devices also interfaces only on one side or configured differently |
+
+**History and data quality**
+
+| Tool | What it does |
+|---|---|
 | `netbox_change_history` | Who changed what and when: filter by object (including its interfaces), user, action and time (`since="7d"`). Updates show only the fields that changed, with references shown by name |
 | `netbox_journal` | Journal notes on an object, or the latest notes across NetBox |
+| `netbox_data_hygiene` | Finds data problems: duplicate IPs, IPs outside any prefix, nearly full or unused prefixes, devices without a primary IP or serial, rack devices without a position, unused VLANs, trunks without cables, cabled interfaces without descriptions. Optionally per site |
 
-Objects can be referenced by name (or address, prefix, label, …), by numeric id, or explicitly as
-`field=value`, e.g. `vid=10` for a VLAN by VID.
+**Config**
+
+| Tool | What it does |
+|---|---|
+| `netbox_render_config` | A device's or VM's intended config, rendered from its config template with its config context |
+| `netbox_config_context` | A device's or VM's merged config context, and which contexts contributed (in merge order, with what they matched on) |
+| `netbox_custom_fields` | Which custom fields exist, their types, choices and object types, and how to filter on them |
 
 ### Any object type
 
@@ -360,12 +406,25 @@ Project layout:
 src/netbox_mcp/
   __init__.py      CLI entry point (server, `token` subcommand)
   config.py        settings from env / .env
-  client.py        async NetBox REST client (auth, paging, retries, errors)
+  client.py        async NetBox REST client (auth, paging, retries, errors, text, GraphQL)
   schema.py        OpenAPI schema index: type resolution, filter/field checks, spec search
   auth.py          bearer-token verifier for HTTP
+  preview.py       preview-first writes: plans, confirm tokens
   server.py        FastMCP app, health route, call logging
-  formatting.py    compact JSON and Markdown output
-  tools/           search, devices, cabling, ipam, generic, spec, writes
+  formatting.py    compact JSON / Markdown output, secret masking
+  tools/           one module per area: search, devices, cabling, sites, ipam, domains,
+                   tenancy, analysis, history, hygiene, config, automation, generic, spec, writes
+scripts/
+  seed_lab.py      creates / removes the integration-test lab (tagged mcp-test)
+  netbox/mcp_lab.py  custom scripts uploaded to NetBox for the script tests
 ```
 
-See [PLAN.md](PLAN.md) for the design notes and roadmap.
+## Status and roadmap
+
+Phase 1 (core server, HTTP + Docker) and phase 2 (dedicated tools across NetBox's API) are done,
+as is preview-first writing. Ideas still open, in [PLAN.md](PLAN.md):
+
+- CI and a published container image
+- Per-user roles (read-only vs read-write)
+- OAuth sign-in (e.g. GitHub) for shared deployments, alongside bearer tokens
+- Multiple NetBox instances behind one server, metrics, ready-made MCP prompts
