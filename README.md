@@ -266,6 +266,22 @@ Objects can be referenced by name (or address, prefix, label, …), by numeric i
 
 ### Changes (only with `NETBOX_MCP_ENABLE_WRITES=true`)
 
+Every change is **preview-first**. Calling a write tool changes nothing: it returns a preview and a
+single-use `confirm` token. To apply, the same tool is called again with exactly the same arguments
+plus `confirm=<token>`. The preview shows:
+
+- **Updates:** each field's current → new value, by name (`site: "MCP Lab (id 3)" → …`)
+- **Deletes:** what goes and the side effects, e.g. a device's components, the IPs assigned to its
+  interfaces (deleted too), cables left half-connected, or VMs that block the delete
+- **Allocations:** the exact IPs, prefixes, VLAN IDs or ASNs that would be taken
+- **`netbox_run_script` with `commit=true`:** an actual dry run of the script, with its output and log
+
+A token is refused if it expired (10 minutes), was already used, belongs to another user, the
+arguments differ, or the objects involved changed since the preview. Then preview again. If a
+change can't be applied (e.g. a port already has a cable), the preview comes back `blocked` with
+the reasons and no token.
+
+
 | Tool | What it does |
 |---|---|
 | `netbox_create_object` | Create one or many objects. Field names are checked |
@@ -281,6 +297,9 @@ Objects can be referenced by name (or address, prefix, label, …), by numeric i
 
 ## Security notes
 
+- **Changes need two steps.** Even with writes enabled, nothing changes until a preview's confirm
+  token is sent back with identical arguments. The token is bound to the caller and to the objects'
+  current state.
 - **Read-only unless you opt in.** When writes are off, the write tools aren't registered at all.
   The NetBox token's own permissions are a second safeguard, so give it only what it needs.
 - **HTTP requires tokens.** The server refuses to start in HTTP mode without them. Tokens are
@@ -308,6 +327,7 @@ Objects can be referenced by name (or address, prefix, label, …), by numeric i
 | Client gets `401 Unauthorized` | The header must be exactly `Authorization: Bearer <raw token>`, not the `sha256:` entry |
 | `Unknown filter` / `Unknown field` | Working as intended: NetBox would silently ignore it. Use the suggested name, or check `netbox_get_definition` |
 | `Invalid custom field filter(s)` | NetBox ignores unsupported custom-field lookups (e.g. `cf_<text field>__ic`) and returns everything. Use the form shown in the error or in `netbox_custom_fields`. Loose text fields already match partial text with plain `cf_<name>=part` |
+| `Confirm token refused: …` | The arguments changed, the objects changed since the preview, or the token expired or was used. Call the tool again without `confirm` for a fresh preview |
 | Write tools missing | Set `NETBOX_MCP_ENABLE_WRITES=true` and restart. For Claude Code, start a new session |
 | Container not `(healthy)` | Run `docker compose logs` and look for configuration errors at startup |
 

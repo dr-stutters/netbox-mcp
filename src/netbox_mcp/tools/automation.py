@@ -14,9 +14,10 @@ from pydantic import Field
 
 from netbox_mcp.client import NetBoxClient
 from netbox_mcp.config import Settings
-from netbox_mcp.deps import current_caller, get_netbox, get_schema
+from netbox_mcp.deps import current_caller, get_netbox, get_previews, get_schema
 from netbox_mcp.errors import InvalidRequest
 from netbox_mcp.formatting import MAX_RESPONSE_CHARS, compact, compact_dict
+from netbox_mcp.preview import Plan, preview_or_apply
 from netbox_mcp.tools.common import choice, content_type, label
 from netbox_mcp.tools.config import check_custom_field_filters
 
@@ -244,9 +245,14 @@ def register(mcp: FastMCP, settings: Settings) -> None:
                 description="How long to wait for the result (0 = return the job id at once).", ge=0, le=120
             ),
         ] = 30,
+        confirm: Annotated[
+            str | None,
+            Field(description="Needed only with commit=true: omit to get a dry-run preview and a token."),
+        ] = None,
     ) -> dict[str, Any]:
-        """Run a NetBox custom script. Defaults to a dry run (commit=false); pass commit=true to keep its
-        changes. Waits for the job and returns its status, output and log."""
+        """Run a NetBox custom script. Defaults to a dry run (commit=false: NetBox rolls back all changes).
+        With commit=true the first call returns a dry-run preview and a confirm token; repeat it with
+        confirm=<token> to run for real. Waits for the job and returns its status, output and log."""
         nb = get_netbox(ctx)
         s = await resolve_script(nb, script)
         data = data or {}
@@ -259,22 +265,45 @@ def register(mcp: FastMCP, settings: Settings) -> None:
             raise InvalidRequest(
                 f"Script {s.get('name')} isn't executable (check the script module for errors)."
             )
-        started = await nb.request(
-            "POST", f"extras/scripts/{s['id']}/", json={"data": data, "commit": commit}
+
+        async def run(commit_run: bool) -> dict[str, Any]:
+            started = await nb.request(
+                "POST", f"extras/scripts/{s['id']}/", json={"data": data, "commit": commit_run}
+            )
+            job = started.get("result") or {}
+            audit.info(
+                "caller=%s run script=%s commit=%s job=%s",
+                current_caller(),
+                s.get("display"),
+                commit_run,
+                job.get("id"),
+            )
+            deadline = time.monotonic() + wait_seconds
+            while choice(job.get("status")) not in FINISHED and time.monotonic() < deadline:
+                await asyncio.sleep(1)
+                job = await nb.get_object(f"core/jobs/{job['id']}/")
+            out = {"script": s.get("display"), "commit": commit_run, **job_summary(job)}
+            if choice(job.get("status")) not in FINISHED:
+                out["note"] = f"Still running; check later with netbox_job_status(job_id={job.get('id')})."
+            return out
+
+        if not commit:
+            return await run(False)  # a dry run changes nothing, so it needs no confirmation
+        args = {"script": script, "data": data, "commit": commit}
+        details: dict[str, Any] = {"script": s.get("display"), "inputs": data}
+        if confirm is None:
+            details["dry_run"] = await run(False)
+        plan = Plan(summary=f"Run {s.get('display')} with commit=true", details=details)
+
+        async def apply() -> dict[str, Any]:
+            return await run(True)
+
+        return await preview_or_apply(
+            get_previews(ctx),
+            tool="netbox_run_script",
+            args=args,
+            confirm=confirm,
+            caller=current_caller(),
+            plan=plan,
+            apply=apply,
         )
-        job = started.get("result") or {}
-        audit.info(
-            "caller=%s run script=%s commit=%s job=%s",
-            current_caller(),
-            s.get("display"),
-            commit,
-            job.get("id"),
-        )
-        deadline = time.monotonic() + wait_seconds
-        while choice(job.get("status")) not in FINISHED and time.monotonic() < deadline:
-            await asyncio.sleep(1)
-            job = await nb.get_object(f"core/jobs/{job['id']}/")
-        out = {"script": s.get("display"), "commit": commit, **job_summary(job)}
-        if choice(job.get("status")) not in FINISHED:
-            out["note"] = f"Still running; check later with netbox_job_status(job_id={job.get('id')})."
-        return out

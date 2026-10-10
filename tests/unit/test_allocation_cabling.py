@@ -10,6 +10,8 @@ from fastmcp.exceptions import ToolError
 from netbox_mcp.config import Settings
 from netbox_mcp.server import create_server
 
+from .conftest import preview_then_apply
+
 N = "http://netbox.test/api"
 
 
@@ -76,12 +78,21 @@ async def test_range_lookup_errors(settings: Settings, netbox: respx.MockRouter)
             await client.call_tool("netbox_next_available_ips", {})
 
 
+async def apply(settings: Settings, tool: str, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    async with Client(create_server(settings)) as client:
+        return await preview_then_apply(client, tool, args)
+
+
 async def test_allocate_ip_from_range(rw: Settings, netbox: respx.MockRouter) -> None:
     mock_range_lookup(netbox)
+    netbox.get("/ipam/ip-ranges/2/available-ips/").mock(
+        return_value=httpx.Response(200, json=[{"address": "10.9.20.200/24"}])
+    )
     post = netbox.post("/ipam/ip-ranges/2/available-ips/").mock(
         return_value=httpx.Response(201, json=[{"id": 7, "address": "10.9.20.200/24"}])
     )
-    out = await call(rw, "netbox_allocate_ips", {"ip_range": "10.9.20.200-210", "status": "dhcp"})
+    preview, out = await apply(rw, "netbox_allocate_ips", {"ip_range": "10.9.20.200-210", "status": "dhcp"})
+    assert preview["preview"]["addresses"] == ["10.9.20.200/24"]
     assert body(post) == [{"status": "dhcp"}]
     assert out["allocated"] == [{"id": 7, "address": "10.9.20.200/24"}]
 
@@ -111,12 +122,18 @@ async def test_allocate_vlans_and_asns(rw: Settings, netbox: respx.MockRouter) -
     netbox.get("/ipam/vlan-groups/4/").mock(
         return_value=httpx.Response(200, json={"id": 4, "display": "Lab"})
     )
+    netbox.get("/ipam/vlan-groups/4/available-vlans/").mock(
+        return_value=httpx.Response(200, json=[{"vid": 1}, {"vid": 2}])
+    )
     vlans = netbox.post("/ipam/vlan-groups/4/available-vlans/").mock(
         return_value=httpx.Response(
             201, json=[{"id": 9, "vid": 1, "name": "GUEST"}, {"id": 10, "vid": 2, "name": "IOT"}]
         )
     )
-    out = await call(rw, "netbox_allocate_vlans", {"group": 4, "names": ["GUEST", "IOT"], "tags": ["lab"]})
+    preview, out = await apply(
+        rw, "netbox_allocate_vlans", {"group": 4, "names": ["GUEST", "IOT"], "tags": ["lab"]}
+    )
+    assert preview["preview"]["vlans"] == ["1 GUEST", "2 IOT"]
     assert body(vlans) == [
         {"name": "GUEST", "status": "active", "tags": [{"slug": "lab"}]},
         {"name": "IOT", "status": "active", "tags": [{"slug": "lab"}]},
@@ -126,10 +143,14 @@ async def test_allocate_vlans_and_asns(rw: Settings, netbox: respx.MockRouter) -
     netbox.get("/ipam/asn-ranges/1/").mock(
         return_value=httpx.Response(200, json={"id": 1, "display": "Private"})
     )
+    netbox.get("/ipam/asn-ranges/1/available-asns/").mock(
+        return_value=httpx.Response(200, json=[{"asn": 64513}])
+    )
     asns = netbox.post("/ipam/asn-ranges/1/available-asns/").mock(
         return_value=httpx.Response(201, json=[{"id": 3, "asn": 64513}])
     )
-    out = await call(rw, "netbox_allocate_asns", {"asn_range": 1, "description": "edge"})
+    preview, out = await apply(rw, "netbox_allocate_asns", {"asn_range": 1, "description": "edge"})
+    assert preview["preview"]["asns"] == [64513]
     assert body(asns) == [{"description": "edge"}]
     assert out["allocated"] == [{"id": 3, "asn": 64513}]
 
@@ -156,7 +177,7 @@ async def test_connect_cable_interface_to_front_port(rw: Settings, netbox: respx
             ],
         )
     )
-    out = await call(
+    preview, out = await apply(
         rw,
         "netbox_connect_cable",
         {
@@ -176,8 +197,9 @@ async def test_connect_cable_interface_to_front_port(rw: Settings, netbox: respx
         "length": 2.0,
         "length_unit": "m",
     }
-    assert out["a"] == "sw1 Gi1/0/5 (interface)"
-    assert out["b"] == "pp1 FP2 (front-port)"
+    assert preview["preview"]["a"] == "sw1 Gi1/0/5 (interface)"
+    assert preview["preview"]["b"] == "pp1 FP2 (front-port)"
+    assert post.call_count == 1
     assert out["path_complete"] is False  # ends at a patch panel front port for now
 
 
@@ -197,8 +219,11 @@ async def test_connect_cable_refusals(rw: Settings, netbox: respx.MockRouter) ->
     netbox.get("/dcim/interfaces/51/").mock(return_value=httpx.Response(200, json={**SW1_GI5, "id": 51}))
     post = netbox.post("/dcim/cables/")
     async with Client(create_server(rw)) as client:
-        with pytest.raises(ToolError, match=r"already has cable OLD \(to rtr1 Gi2 \(interface\)\)"):
+        blocked = (
             await client.call_tool("netbox_connect_cable", {"a_port_id": 50, "b_port_id": 51})
+        ).structured_content
+        assert blocked["status"] == "blocked"
+        assert "already has cable OLD (to rtr1 Gi2 (interface))" in blocked["blockers"][0]
         with pytest.raises(ToolError, match="same port"):
             await client.call_tool("netbox_connect_cable", {"a_port_id": 51, "b_port_id": 51})
         with pytest.raises(ToolError, match="length_unit"):
@@ -214,14 +239,14 @@ async def test_connect_cable_to_circuit_termination_by_cid(rw: Settings, netbox:
     )
     post = netbox.post("/dcim/cables/").mock(return_value=httpx.Response(201, json={"id": 31}))
     netbox.get("/dcim/interfaces/51/trace/").mock(return_value=httpx.Response(200, json=[]))
-    out = await call(
+    preview, _ = await apply(
         rw,
         "netbox_connect_cable",
         {"a_port_id": 51, "b_type": "circuit-termination", "b_device": "CID1", "b_port": "z"},
     )
     assert terms.calls.last.request.url.params["term_side"] == "Z"
     assert body(post)["b_terminations"] == [{"object_type": "circuits.circuittermination", "object_id": 3}]
-    assert out["b"] == "CID1 term Z (circuit-termination)"
+    assert preview["preview"]["b"] == "CID1 term Z (circuit-termination)"
 
 
 async def test_new_write_tools_are_gated(settings: Settings, netbox: respx.MockRouter) -> None:

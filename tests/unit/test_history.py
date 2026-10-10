@@ -15,7 +15,7 @@ from netbox_mcp.server import create_server
 from netbox_mcp.tools.common import content_type
 from netbox_mcp.tools.history import diff, format_change, parse_time
 
-from .conftest import MINI_SPEC
+from .conftest import MINI_SPEC, preview_then_apply
 
 NOW = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
 
@@ -204,13 +204,15 @@ async def test_add_journal_entry_is_write_gated(settings: Settings, netbox: resp
     post = netbox.post("/extras/journal-entries/").mock(
         return_value=httpx.Response(201, json={"id": 9, "created": "t"})
     )
-    out = await call(
-        rw, "netbox_add_journal_entry", {"object_type": "devices", "object": 5, "comments": "hi"}
-    )
+    args = {"object_type": "devices", "object": 5, "comments": "hi"}
+    async with Client(create_server(rw)) as client:
+        preview, applied = await preview_then_apply(client, "netbox_add_journal_entry", args)
+    assert preview["preview"] == {"object": "dcim.device sw1 (id 5)", "kind": "info", "comments": "hi"}
+    assert post.call_count == 1
     assert json.loads(post.calls.last.request.content) == {
         "assigned_object_type": "dcim.device",
         "assigned_object_id": 5,
         "kind": "info",
         "comments": "hi",
     }
-    assert out == {"id": 9, "object": "dcim.device sw1", "kind": "info", "created": "t"}
+    assert applied["id"] == 9

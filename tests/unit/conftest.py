@@ -125,6 +125,7 @@ MINI_SPEC: dict[str, Any] = {
                 "required": ["site"],
                 "properties": {
                     "name": {"type": "string", "maxLength": 64},
+                    "serial": {"type": "string", "maxLength": 50},
                     "status": {"enum": ["active", "offline"], "type": "string"},
                     "site": {
                         "oneOf": [{"type": "integer"}, {"$ref": "#/components/schemas/BriefSiteRequest"}]
@@ -182,3 +183,14 @@ def netbox() -> Iterator[respx.MockRouter]:
         )
         router.get("/schema/").mock(return_value=httpx.Response(200, json=MINI_SPEC))
         yield router
+
+
+async def preview_then_apply(
+    client: Any, tool: str, args: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Call a preview-first write tool twice on the same client: preview, then confirm with its token."""
+    preview = (await client.call_tool(tool, args)).structured_content
+    assert preview["status"] == "preview", preview
+    applied = (await client.call_tool(tool, {**args, "confirm": preview["confirm"]})).structured_content
+    assert applied["status"] == "applied", applied
+    return preview, applied
