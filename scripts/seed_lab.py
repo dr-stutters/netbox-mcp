@@ -24,6 +24,28 @@ from netbox_mcp.client import NetBoxClient
 from netbox_mcp.config import Settings
 
 TAG = "mcp-test"
+# Seeded objects that can't carry the mcp-test tag; --delete finds these by name instead.
+UNTAGGED = (
+    "extras/tags/",
+    "extras/config-contexts/",
+    "extras/custom-fields/",
+    "extras/custom-field-choice-sets/",
+)
+
+# Jinja2 template rendered by NetBox; config-context keys (ntp_servers, ...) are top-level variables.
+CONFIG_TEMPLATE = """hostname {{ device.name }}
+ip domain name {{ domain_name }}
+{% for server in ntp_servers %}ntp server {{ server }}
+{% endfor %}logging host {{ syslog_server }}
+{% if stp_mode %}spanning-tree mode {{ stp_mode }}
+{% endif %}!
+{% for iface in device.interfaces.all() %}interface {{ iface.name }}
+{% if iface.description %} description {{ iface.description }}
+{% endif %}{% for ip in iface.ip_addresses.all() %} ip address {{ ip.address.ip }} {{ ip.address.netmask }}
+{% endfor %}{% if not iface.enabled %} shutdown
+{% endif %}!
+{% endfor %}end
+"""
 
 
 class Seeder:
@@ -41,7 +63,8 @@ class Seeder:
         if existing:
             return existing[0]
         body = {**lookup, **(data or {})}
-        if self.tag_id and path != "extras/tags/":
+        # Config contexts use `tags` as an assignment rule, not a label; custom fields have no tags.
+        if self.tag_id and path not in UNTAGGED:
             body.setdefault("tags", [{"id": self.tag_id}])
         obj: dict[str, Any] = await self.nb.request("POST", path, json=body)
         print(f"  created {path}{obj['id']}  {obj.get('display')}")
@@ -358,10 +381,67 @@ class Seeder:
             )
             await self.patch("dcim/interfaces/", iface_obj["id"], {"primary_mac_address": m["id"]})
 
+        # --- Config template (via the IOS-XE platform) and config contexts ---
+        template = await self.ensure(
+            "extras/config-templates/", {"name": "MCP IOS-XE base"}, {"template_code": CONFIG_TEMPLATE}
+        )
+        await self.patch("dcim/platforms/", iosxe["id"], {"config_template": template["id"]})
+        await self.ensure(
+            "extras/config-contexts/",
+            {"name": "MCP Lab defaults"},
+            {
+                "weight": 1000,
+                "sites": [site["id"]],
+                "data": {
+                    "ntp_servers": ["10.99.99.250", "10.99.99.251"],
+                    "syslog_server": "10.99.99.252",
+                    "domain_name": "mcp.lab",
+                },
+            },
+        )
+        await self.ensure(
+            "extras/config-contexts/",
+            {"name": "MCP Lab switches"},
+            {
+                "weight": 2000,
+                "sites": [site["id"]],
+                "roles": [roles["switch"]["id"]],
+                "data": {"ntp_servers": ["10.99.99.253"], "stp_mode": "rapid-pvst"},
+            },
+        )
+
+        # --- A select custom field on devices, set on lab-sw1 ---
+        tiers = await self.ensure(
+            "extras/custom-field-choice-sets/",
+            {"name": "MCP Tiers"},
+            {"extra_choices": [["gold", "Gold"], ["silver", "Silver"]]},
+        )
+        await self.ensure(
+            "extras/custom-fields/",
+            {"name": "mcp_tier"},
+            {
+                "label": "MCP tier",
+                "type": "select",
+                "object_types": ["dcim.device"],
+                "choice_set": tiers["id"],
+            },
+        )
+        await self.patch("dcim/devices/", devs["lab-sw1"]["id"], {"custom_fields": {"mcp_tier": "gold"}})
+
         print("Seed complete.")
 
     async def delete(self) -> None:
         # Dependency order: things that reference others first.
+        # Untagged objects (see UNTAGGED), found by their MCP name prefix.
+        for path, by_name in (
+            ("extras/config-contexts/", {"name__isw": "MCP Lab "}),
+            ("extras/custom-fields/", {"name__isw": "mcp_"}),
+            ("extras/custom-field-choice-sets/", {"name__isw": "MCP "}),
+        ):
+            objs, _ = await self.nb.list(path, by_name, limit=100)
+            if objs:
+                await self.nb.request("DELETE", path, json=[{"id": o["id"]} for o in objs])
+                print(f"  deleted {len(objs)} from {path}")
         order = [
             "dcim/cables/",
             "dcim/mac-addresses/",
@@ -388,6 +468,7 @@ class Seeder:
             "ipam/rirs/",
             "dcim/device-types/",
             "dcim/platforms/",
+            "extras/config-templates/",
             "dcim/manufacturers/",
             "dcim/device-roles/",
             "dcim/sites/",

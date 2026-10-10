@@ -151,3 +151,20 @@ async def test_next_available_vlans_asns_and_range_ips(client: Client[Any]) -> N
     assert asns["available"] == [64513]  # 64512 is taken in the seed
     ips = await call(client, "netbox_next_available_ips", ip_range="10.99.20.125")
     assert ips["available"] == ["10.99.20.100/24"]
+
+
+async def test_render_config_and_context(client: Client[Any]) -> None:
+    rendered = await call(client, "netbox_render_config", name="lab-sw1")
+    assert rendered["template"] == "MCP IOS-XE base"
+    assert "ntp server 10.99.99.253" in rendered["config"]  # switch context overrides the site default
+    ctx = await call(client, "netbox_config_context", name="lab-sw1")
+    assert [s["name"] for s in ctx["sources"]] == ["MCP Lab defaults", "MCP Lab switches"]
+    assert ctx["config_context"]["stp_mode"] == "rapid-pvst"
+
+
+async def test_custom_fields_and_cf_filters(client: Client[Any]) -> None:
+    cfs = await call(client, "netbox_custom_fields", object_type="devices")
+    tier = next(cf for cf in cfs["custom_fields"] if cf["name"] == "mcp_tier")
+    assert tier["choices"] == ["gold", "silver"]
+    out = await call(client, "netbox_list_objects", object_type="devices", filters={"cf_mcp_tier": "gold"})
+    assert [r["name"] for r in out["results"]] == ["lab-sw1"]
