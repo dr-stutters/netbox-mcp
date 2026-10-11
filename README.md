@@ -428,3 +428,7 @@ as is preview-first writing. Ideas still open, in [PLAN.md](PLAN.md):
 - Per-user roles (read-only vs read-write)
 - OAuth sign-in (e.g. GitHub) for shared deployments, alongside bearer tokens
 - Multiple NetBox instances behind one server, metrics, ready-made MCP prompts
+
+## License
+
+[MIT](LICENSE)
