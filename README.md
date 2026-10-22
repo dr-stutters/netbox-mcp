@@ -11,6 +11,11 @@ language and the model uses NetBox's API for you:
 
 Built with [FastMCP](https://gofastmcp.com) for **NetBox 4.x** (tested on 4.7).
 
+> **Disclaimer.** This is not an official NetBox Labs product or repository, and it isn't supported or
+> endorsed by NetBox Labs. It's a personal project by [@dr-stutters](https://github.com/dr-stutters),
+> for lab and learning use only: don't point it at production systems. It's provided as is, with no
+> warranty (see the [license](LICENSE)). NetBox is a trademark of NetBox Labs, Inc.
+
 ## Features
 
 - **55 tools** (45 read-only, 10 that change data), from quick lookups to full analyses:
